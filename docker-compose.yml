@@ -1,0 +1,45 @@
+# CitySense local stack.
+#   DB only:     docker compose up -d postgres-postgis
+#   DB + core:   docker compose --profile app up -d
+services:
+  postgres-postgis:
+    build: ./db
+    image: citysense-db:latest
+    container_name: citysense-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-citysense}
+      POSTGRES_USER: ${POSTGRES_USER:-citysense}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-citysense}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - citysense-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  core:
+    profiles: ["app"]
+    build: ./core
+    container_name: citysense-core
+    depends_on:
+      postgres-postgis:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-postgis:5432/${POSTGRES_DB:-citysense}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-citysense}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-citysense}
+      # Dev defaults so the stack boots without a .env; override both outside local dev.
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-please-32-bytes-min!!}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-internal-key}
+      DEMO_MODE: ${DEMO_MODE:-1}
+      CORRELATION_RADIUS_METERS: ${CORRELATION_RADIUS_METERS:-500}
+      CORRELATION_WINDOW_MINUTES: ${CORRELATION_WINDOW_MINUTES:-30}
+    ports:
+      - "8080:8080"
+
+volumes:
+  citysense-pgdata:
