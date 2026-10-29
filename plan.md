@@ -281,9 +281,9 @@ No claims of live access to city cameras, signals, hospitals, dispatch or citize
 
 ## 16. Day-1 checklist
 
-1. Create the repo layout, `docker-compose.yml` and `.env.example` (DB, SARVAM_KEY, LLM_KEY, DEMO_MODE, ESCALATION_TICK_SECONDS, AI_SERVICE_URL).
-2. Spring Boot skeleton (Maven, Java 21) with Flyway baseline from section 7, springdoc, JWT stub, STOMP `/ws`.
-3. Write the public and internal OpenAPI specs from section 9; generate TypeScript types for mobile and dashboard and the Java client for ai-service.
-4. Seed data: Dehradun junctions, hospitals, 10 events, 10 knowledge docs, 3 complaints.
-5. FastAPI skeleton with `/health` and stub endpoints returning cached JSON.
-6. Expo and Vite apps render the map and show injected events live over STOMP.
+- [ ] 1. Create the repo layout, `docker-compose.yml` and `.env.example` (DB, SARVAM_KEY, LLM_KEY, DEMO_MODE, ESCALATION_TICK_SECONDS, AI_SERVICE_URL). *(AI Service container & .env.example complete in `Avatarzip`)*
+- [ ] 2. Spring Boot skeleton (Maven, Java 21) with Flyway baseline from section 7, springdoc, JWT stub, STOMP `/ws`.
+- [ ] 3. Write the public and internal OpenAPI specs from section 9; generate TypeScript types for mobile and dashboard and the Java client for ai-service.
+- [ ] 4. Seed data: Dehradun junctions, hospitals, 10 events, 10 knowledge docs, 3 complaints. *(Agent configs & knowledge seed pipeline implemented in `Avatarzip/scripts/seed.py`)*
+- [x] 5. FastAPI skeleton with `/health` and stub endpoints returning cached JSON. *(Fully implemented in `Avatarzip` with full RAG, providers, and orchestrator)*
+- [ ] 6. Expo and Vite apps render the map and show injected events live over STOMP.
