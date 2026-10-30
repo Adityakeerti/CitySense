@@ -141,51 +141,43 @@ CitySense/
 ├── .env.example                        # Required environment variables
 │
 ├── contracts/                          # Contract-first OpenAPI specs & schemas
-│   ├── openapi-public.yaml             # Spring Boot public API spec
-│   ├── openapi-internal.yaml           # FastAPI internal AI service spec
-│   └── event.schema.json               # Canonical Observation JSON schema
+│   └── openapi-public.yaml             # Spring Boot public API spec
 │
-├── core/                               # [M1-M4] Spring Boot 3 Core Backend (Java 21)
+├── core/                               # [Member A] Spring Boot 3 Core Backend (Java 21)
 │   ├── pom.xml                         # Maven dependencies & plugins
 │   ├── src/main/java/com/citysense/
-│   │   ├── platform/                   # [M1: Member A] Core platform, auth, coordinator, audit, WS
-│   │   ├── agent/                      # [M2: Member B] Agent gateway, knowledge CRUD, tool bridge
-│   │   ├── civic/                      # [M3: Member C] Events, complaints, escalation, geofence
-│   │   ├── mobility/                   # [M4: Member D] Routes API, traffic telemetry, green corridor
-│   │   └── common/                     # Cross-cutting: security, errors, fallback cache adapters
+│   │   ├── platform/                   # Core platform, auth, coordinator, audit, WebSocket STOMP
+│   │   └── common/                     # Security, exceptions, configuration
 │   └── src/main/resources/
 │       ├── application.yml
-│       └── db/migration/               # Flyway SQL migrations (V1-V4)
+│       └── db/migration/               # Flyway SQL migrations (V1__platform.sql)
 │
-├── ai-service/                         # [M2, M4] Python FastAPI Microservice (Python 3.11+)
-│   ├── requirements.txt
-│   ├── app/
-│   │   ├── main.py                     # Internal FastAPI server
-│   │   ├── agent/                      # [M2: Member B] RAG, pgvector, Sarvam STT/TTS, abstain policy
-│   │   ├── cv/                         # [M4: Member D] YOLOv8 lane occupancy detection
-│   │   ├── routing/                    # [M4: Member D] NetworkX road graph & hysteresis engine
-│   │   └── rl/                         # [M4: Member D] SUMO + TraCI DQN reinforcement learning
-│   └── tests/
+├── db/                                 # [Member A] PostGIS database Dockerfile & seed
+│   ├── Dockerfile
+│   └── seed/dev_seed.sql
 │
-├── mobile/                             # [M1-M4] Citizen & Crew Mobile App (React Native + Expo)
-│   ├── package.json
-│   ├── app/
-│   │   ├── _layout.tsx                 # [M1] Root shell & navigation
-│   │   └── (tabs)/
-│   │       ├── index.tsx               # [M3] Explore Tab (Map & Feed)
-│   │       ├── ask.tsx                 # [M2] Ask Tab (Hero Multilingual Agent)
-│   │       ├── report.tsx              # [M3] Report Tab (Complaints with Photo)
-│   │       ├── track.tsx               # [M3] Track Tab (Escalation Timeline)
-│   │       └── alerts.tsx              # [M4] Alerts Tab (Crew Route & Green Corridor)
+├── agent_service/                      # [Member B] Multilingual AI Agent & RAG Service (Python 3.11)
+│   ├── src/                            # FastAPI app, RAG pgvector pipeline, Sarvam STT/TTS
+│   ├── scripts/                        # Seed, bootstrap & provider verification
+│   ├── eval/                           # RAG evaluation benchmark
+│   └── UI.html                         # Interactive Ask Tab & Citizen Voice Assistant UI
 │
-└── dashboard/                          # [M1-M4] Municipal Operations Dashboard (React + Vite)
-    ├── package.json
-    └── src/
-        ├── features/
-        │   ├── platform/               # [M1] Live map, Scenario Injector, Approval Queue, Audit Log
-        │   ├── agent/                  # [M2] Knowledge Base Manager, Agent Monitor
-        │   ├── civic/                  # [M3] Complaints Board, Events Publisher
-        │   └── mobility/               # [M4] Traffic Telemetry, YOLO Feed, RL Signal Chart
+├── complaint_module/                   # [Member C] Civic Services & Escalation Engine (Python 3.11)
+│   ├── app/                            # FastAPI, LangGraph StateGraph, LLM router & coordinator
+│   ├── data/                           # Authorities JSON, citizen profile, workers matrix
+│   ├── static/UI.html                  # Blue & white escalation dashboard with live telemetry bus
+│   └── test_pipeline.py                # 8-test automated verification suite
+│
+├── emergency_routing/                  # [Member D] Intelligent Mobility & Emergency Routing (Python 3.11)
+│   ├── models/                         # YOLOv8 accident & feud CV detectors, vision pipeline
+│   ├── routing/                        # NetworkX arrival-time graph & dwell-time hysteresis
+│   ├── agents/                         # LangGraph emergency & ambulance dispatch agents
+│   └── ui.html                         # Live map, video inference feed & route commitment UI
+│
+└── docs/                               # Architecture blueprints, member guides & slide decks
+    ├── MEMBER_A_PLATFORM.md            # Member A verification and platform report
+    └── MembersTask.md                  # Team role assignments and task breakdown
+
 ```
 
 ---
