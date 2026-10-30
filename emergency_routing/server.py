@@ -1,6 +1,7 @@
 """FastAPI Backend Server bridging UI Dashboard to LangGraph Emergency Agent."""
 
 import os
+import math
 import base64
 from pathlib import Path
 from typing import Optional
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 
 from config.settings import settings
 from services.hospital_service import HospitalService
+from services.weather_service import WeatherService, WeatherCondition
 from routing.predictive_router import PredictiveRouter
 from agents.ambulance_agent import AmbulanceAgent
 from agents.feud_tracker import FeudTracker
@@ -306,6 +308,145 @@ def get_hospitals():
             for h in hospital_service.hospitals.values()
         ]
     }
+
+
+# ── Weather & Inundation Routing Endpoints ────────────────────────────────────
+class WeatherConditionUpdate(BaseModel):
+    segment_id: str
+    rainfall_mm: float = 0.0
+    flood_depth_cm: float = 0.0
+    is_blocked: bool = False
+    block_reason: Optional[str] = None
+
+
+class RouteSyncRequest(BaseModel):
+    origin_node: str
+    destination_node: str
+    city: str = "Dehradun"
+    apply_live_weather: bool = True
+    simulated_flood_edge: Optional[str] = None
+    simulated_flood_depth_cm: Optional[float] = None
+
+
+@app.get("/api/weather/current")
+def get_current_weather(
+    city: str = "Dehradun",
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+):
+    """Fetches real-time weather & flood depth analytics via Open-Meteo free API."""
+    if lat is not None and lon is not None:
+        weather = WeatherService.get_weather_for_location(lat, lon, city_label=city)
+    else:
+        weather = WeatherService.get_city_weather(city)
+    return weather.model_dump()
+
+
+@app.post("/api/weather/apply-conditions")
+def apply_weather_condition(update: WeatherConditionUpdate):
+    """Sets weather or flood water depth on a specific road segment."""
+    edge = graph.edges_by_id.get(update.segment_id)
+    if not edge:
+        raise HTTPException(status_code=404, detail=f"Edge '{update.segment_id}' not found in road network")
+
+    graph.set_weather_condition(
+        edge_id=update.segment_id,
+        rainfall_mm=update.rainfall_mm,
+        flood_depth_cm=update.flood_depth_cm,
+        is_blocked=update.is_blocked,
+        block_reason=update.block_reason,
+    )
+    eff_time = edge.effective_travel_time_minutes
+    return {
+        "status": "UPDATED",
+        "segment_id": update.segment_id,
+        "rainfall_mm": update.rainfall_mm,
+        "flood_depth_cm": update.flood_depth_cm,
+        "effective_travel_time_minutes": round(eff_time, 2) if not math.isinf(eff_time) else None,
+        "is_blocked": edge.is_blocked,
+    }
+
+
+@app.post("/api/weather/sync-route")
+def sync_weather_and_route(request: RouteSyncRequest):
+    """Combines live Open-Meteo weather with road network flood conditions,
+    computes predictive emergency route, and generates citizen notifications.
+    """
+    # 1. Fetch live weather
+    weather = WeatherService.get_city_weather(request.city)
+
+    # 2. Optionally inject simulated waterlogging on an underpass / road
+    if request.simulated_flood_edge and request.simulated_flood_depth_cm is not None:
+        graph.set_weather_condition(
+            request.simulated_flood_edge,
+            rainfall_mm=weather.rain_mm or 25.0,
+            flood_depth_cm=request.simulated_flood_depth_cm,
+            is_blocked=request.simulated_flood_depth_cm >= 25.0,
+            block_reason=f"Waterlogged underpass ({request.simulated_flood_depth_cm}cm)",
+        )
+
+    # 3. Plan predictive route
+    decision = router.plan_emergency_route(request.origin_node, request.destination_node)
+    if not decision:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No route found between {request.origin_node} and {request.destination_node}",
+        )
+
+    # 4. Generate citizen proximity notifications
+    citizen_notifications = []
+    if decision.weather_rerouted:
+        blocked_nodes = [w.segment_id for w in decision.weather_evaluations if w.is_impassable]
+        citizen_notifications.append({
+            "target_area": f"{request.city} - {', '.join(blocked_nodes) if blocked_nodes else 'Low-lying sectors'}",
+            "severity": "CRITICAL",
+            "title": "Severe Waterlogging Road Closure",
+            "message": (
+                f"⚠️ ADVISORY: Flash inundation observed ({decision.weather_evaluations[0].flood_depth_cm if decision.weather_evaluations else '25+'}cm). "
+                f"Emergency bypass activated. Citizens are advised to avoid {blocked_nodes}."
+            ),
+            "suggested_bypass": decision.selected_path.edges,
+            "timestamp": weather.observed_at,
+        })
+    elif weather.water_depth_cm_estimate > 5.0 or weather.precipitation_mm > 10.0:
+        citizen_notifications.append({
+            "target_area": f"{request.city} Urban Corridors",
+            "severity": "WARNING",
+            "title": "Wet Weather Driving Advisory",
+            "message": f"Rainfall: {weather.precipitation_mm}mm. Minor surface pooling. Drive with caution.",
+            "suggested_bypass": [],
+            "timestamp": weather.observed_at,
+        })
+
+    return {
+        "weather": weather.model_dump(),
+        "route_decision": decision.model_dump(),
+        "citizen_notifications": citizen_notifications,
+    }
+
+
+@app.get("/api/network/graph")
+def get_network_graph():
+    """Returns road network nodes, edges, flood status, and speed limits."""
+    nodes = [{"id": n.id, "name": n.name, "latitude": n.latitude, "longitude": n.longitude} for n in graph.nodes.values()]
+    edges = [
+        {
+            "id": e.id,
+            "start_node": e.start_node,
+            "end_node": e.end_node,
+            "distance_km": e.distance_km,
+            "speed_limit_kmh": e.speed_limit_kmh,
+            "nominal_travel_time_minutes": round(e.nominal_travel_time_minutes, 2),
+            "effective_travel_time_minutes": round(e.effective_travel_time_minutes, 2) if not math.isinf(e.effective_travel_time_minutes) else 999.0,
+            "flood_depth_cm": e.flood_depth_cm,
+            "rainfall_intensity_mm": e.rainfall_intensity_mm,
+            "is_blocked": e.is_blocked,
+            "block_reason": e.block_reason,
+            "has_jam": e.active_jam is not None,
+        }
+        for e in graph.edges_by_id.values()
+    ]
+    return {"nodes": nodes, "edges": edges}
 
 
 if __name__ == "__main__":

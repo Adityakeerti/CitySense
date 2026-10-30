@@ -35,6 +35,9 @@ public class SecurityConfig {
                         .requestMatchers("/ws/**", "/ws-sockjs/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/actuator/health/**").permitAll()
+                        .requestMatchers("/api/weather/**", "/api/mobility/**").permitAll()
+                        .requestMatchers("/api/complaints/**", "/api/city-events/**").permitAll()
+                        .requestMatchers("/api/agent/**").permitAll()
                         // Denials forward to /error without re-running the JWT filter; keep 403s from becoming 401s.
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/internal/**").hasRole("INTERNAL")
