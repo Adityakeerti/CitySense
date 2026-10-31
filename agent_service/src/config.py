@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     local_llm_model: str = "local-model"
     groq_api_key: SecretStr | None = None
     sarvam_api_key: SecretStr | None = None
+    gemini_api_key: SecretStr | None = None
+    tavily_api_key: SecretStr | None = None
     provider_order: str = "local,groq,sarvam"
     log_level: str = "INFO"
     max_message_length: int = Field(default=4000, ge=100, le=4000)
@@ -33,10 +35,13 @@ class Settings(BaseSettings):
     local_stt_base_url: str | None = None
     groq_base_url: str = "https://api.groq.com/openai/v1"
     sarvam_base_url: str = "https://api.sarvam.ai"
-    groq_model: str = "llama-3.1-8b-instant"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    groq_model: str = "openai/gpt-oss-20b"
+    groq_guard_model: str = "meta-llama/llama-prompt-guard-2-86m"
     groq_stt_model: str = "whisper-large-v3-turbo"
     sarvam_model: str = "sarvam-105b"
     sarvam_stt_model: str = "saaras:v3"
+    gemini_model: str = "gemini-3.8-flash"
     local_stt_model: str = "whisper-1"
     local_llm_api_key: SecretStr | None = None
     stt_provider_order: str = "local,groq,sarvam"
@@ -54,13 +59,16 @@ class Settings(BaseSettings):
     complaint_status_url: str | None = None
     events_url: str | None = None
     alerts_url: str | None = None
+    traffic_density_url: str | None = None
+    emergency_corridor_url: str | None = None
+    user_complaints_url: str | None = None
     adapter_api_key: SecretStr | None = None
     cors_origins: list[str] = Field(default_factory=list)
     refresh_allowed_domains: list[str] = Field(default_factory=list)
     refresh_interval_seconds: int = Field(default=3600, ge=60)
     request_timeout_seconds: float = Field(default=90, gt=0, le=300)
     model_config = SettingsConfigDict(
-        env_file=".env", env_prefix="", extra="ignore", env_ignore_empty=True
+        env_file=(".env", "../../.env"), env_prefix="", extra="ignore", env_ignore_empty=True
     )
 
     @property
@@ -74,7 +82,7 @@ class Settings(BaseSettings):
                 "Hash embeddings are only allowed in DEMO_MODE; production requires E5"
             )
         for name in self.providers + self.stt_provider_order.split(","):
-            if name.strip() not in {"local", "groq", "sarvam"}:
+            if name.strip() not in {"local", "groq", "sarvam", "gemini"}:
                 raise ValueError(f"Unknown provider: {name}")
         return self
 
@@ -90,10 +98,14 @@ class Settings(BaseSettings):
         "local_stt_base_url",
         "groq_base_url",
         "sarvam_base_url",
+        "gemini_base_url",
         "complaint_adapter_url",
         "complaint_status_url",
         "events_url",
         "alerts_url",
+        "traffic_density_url",
+        "emergency_corridor_url",
+        "user_complaints_url",
     )
     @classmethod
     def endpoint_url(cls, value: str | None) -> str | None:

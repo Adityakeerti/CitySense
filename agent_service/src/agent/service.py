@@ -129,6 +129,41 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
     )
     city = request.context.cityId or settings.default_city_id
     chat_session.language = language
+
+    from src.agent.orchestrator import supervisor
+
+    (
+        handled,
+        sub_status,
+        sub_answer,
+        sub_sources,
+        sub_cta,
+        sub_pending,
+    ) = await supervisor.evaluate_turn(
+        session=session,
+        principal=principal,
+        request=request,
+        chat_session=chat_session,
+        agent=agent,
+        language=language,
+        city=city,
+        started=started,
+    )
+    if handled:
+        return await persist_turn(
+            session,
+            chat_session,
+            request,
+            agent,
+            sub_status,
+            sub_answer,
+            sub_sources,
+            "live",
+            cta=sub_cta,
+            pending_action=sub_pending,
+            started=started,
+        )
+
     hits = await retrieve(session, request.message, list(agent.tenants), limit=6)
     evidence = evidence_for(hits, agent.min_similarity, city)
     if evidence.abstain:

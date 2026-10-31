@@ -1,0 +1,147 @@
+from datetime import datetime, timezone
+from typing import Any
+from uuid import uuid4
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.agent.service import evidence_for
+from src.agent.subagents.base import BaseSubAgent, SubAgentResult
+from src.auth.schemas import Principal
+from src.config import settings
+from src.knowledge.retrieval import RetrievalHit, retrieve
+
+
+class KnowledgeSpecialist(BaseSubAgent):
+    name: str = "knowledge_specialist"
+    description: str = "Specialist for verified civic knowledge retrieval, evidence validation, and grounded citations"
+
+    async def execute(
+        self,
+        session: AsyncSession | None,
+        principal: Principal,
+        message: str,
+        context: Any = None,
+        language: str = "en",
+        **kwargs: Any,
+    ) -> SubAgentResult:
+        execution_steps: list[str] = []
+
+        # Step 1: retrieve_evidence
+        execution_steps.append("retrieve_evidence")
+
+        tenants = kwargs.get("tenants") or ["civic", "municipal", "general"]
+        min_similarity = kwargs.get("min_similarity", 0.70)
+        city = (
+            getattr(context, "cityId", None)
+            if context
+            else None
+        ) or (
+            context.get("cityId") if isinstance(context, dict) else None
+        ) or settings.default_city_id
+
+        hits: list[RetrievalHit] = []
+
+        if session is not None:
+            try:
+                hits = await retrieve(session, message, tenants, limit=kwargs.get("limit", 6))
+            except Exception:
+                hits = []
+
+        if not hits:
+            # Check offline corpus fallback
+            try:
+                from src.agent.offline import offline_corpus
+                scored_docs = offline_corpus.search(message, language)
+                for rank, (doc, score, excerpt) in enumerate(scored_docs[:3], 1):
+                    # Map offline score to similarity scale (scores >= 5.0 map to >= 0.70)
+                    normalized_score = min(score / 7.0, 0.95) if score >= 2.0 else 0.40
+                    hits.append(
+                        RetrievalHit(
+                            chunk_id=uuid4(),
+                            doc_id=uuid4(),
+                            tenant_id="municipal",
+                            text=excerpt or doc["content"][:500],
+                            section=None,
+                            vector_score=normalized_score,
+                            vector_rank=rank,
+                            lexical_rank=rank,
+                            fused_score=score,
+                            jurisdiction=doc.get("jurisdiction", city),
+                            verified=True,
+                            expires_at=None,
+                            title=doc["title"],
+                            source_url=doc["url"],
+                            fetched_at=datetime.now(timezone.utc),
+                        )
+                    )
+            except Exception:
+                hits = []
+
+        # Step 2: validate_evidence
+        execution_steps.append("validate_evidence")
+
+        if hits:
+            evidence = evidence_for(hits, min_similarity, city)
+        else:
+            from src.knowledge.evidence import EvidenceResult
+            evidence = EvidenceResult(usable_hits=[], abstain=True, flags=["no_hits"])
+
+        # Step 3: synthesize_or_abstain
+        execution_steps.append("synthesize_or_abstain")
+
+        if evidence.abstain or not evidence.usable_hits:
+            if language == "hi":
+                answer = (
+                    "इस प्रश्न के लिए मेरे पास देहरादून नागरिक रिकॉर्ड में सत्यापित जानकारी नहीं है।"
+                )
+            else:
+                answer = (
+                    "I do not have verified municipal information for that question in civic records."
+                )
+
+            return SubAgentResult(
+                status="ABSTAINED",
+                response_text=answer,
+                sources=[],
+                cta="file_complaint",
+                execution_steps=execution_steps,
+                metadata={"abstain": True, "flags": list(evidence.flags)},
+            )
+
+        supported_ids = {h.chunk_id for h in evidence.usable_hits}
+        usable = [h for h in hits if str(h.chunk_id) in supported_ids]
+        if not usable:
+            usable = hits[:1]
+
+        best = usable[0]
+        sources = [
+            {
+                "docId": str(h.doc_id),
+                "title": h.title,
+                "url": h.source_url,
+                "excerpt": h.text[:500],
+                "fetchedAt": h.fetched_at.isoformat() if hasattr(h.fetched_at, "isoformat") else str(h.fetched_at),
+                "stale": False,
+            }
+            for h in usable
+        ]
+
+        if language == "hi":
+            response_text = (
+                f"सत्यापित स्रोत ({best.title}) के अनुसार:\n\n{best.text.strip()}\n\n"
+                f"*स्रोत: {best.title}*"
+            )
+        else:
+            response_text = (
+                f"Based on verified municipal records ({best.title}):\n\n{best.text.strip()}\n\n"
+                f"*Source: {best.title}*"
+            )
+
+        return SubAgentResult(
+            status="ANSWERED",
+            response_text=response_text,
+            sources=sources,
+            cta=None,
+            execution_steps=execution_steps,
+            metadata={"usable_count": len(usable), "top_title": best.title},
+        )
