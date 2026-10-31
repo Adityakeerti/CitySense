@@ -77,6 +77,10 @@ citysense:
   civic:
     priorities: ${CIVIC_PRIORITIES:LOW,MEDIUM,HIGH,URGENT}
     escalation-ladder: ${CIVIC_ESCALATION_LADDER:Filed,Worker assigned,Warning 1,Warning 2,Warning 3,Warning 4,Warning 5,Ward officer,Municipal commissioner,CM portal}
+    # Per-user sliding window for POST /api/complaints; the 11th filing within an hour gets 429 + Retry-After.
+    filing-limit:
+      max-per-window: ${COMPLAINT_FILING_LIMIT_MAX:10}
+      window: ${COMPLAINT_FILING_LIMIT_WINDOW:PT1H}
   avatars:
     seed-enabled: ${SEED_AVATARS:true}
     seed-location: ${AVATAR_SEED_LOCATION:classpath:seed/avatars.json}

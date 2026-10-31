@@ -8,6 +8,22 @@ public class CivicDtos {
 
     public record CivicMeta(java.util.List<String> priorities, java.util.List<String> escalationLadder) {}
 
+    /**
+     * What a complaint event may say on the unauthenticated live channel (/topic/city-events): no name,
+     * description, exact location, photo, tracking ID, worker or notes, and a generated title instead of
+     * the citizen's free text. Full details stay behind the authenticated REST endpoints.
+     */
+    public record ComplaintLiveEvent(UUID id, String title, String category, String department, String status,
+                                     String priority) {
+        public static ComplaintLiveEvent of(Complaint c, boolean filed) {
+            String dept = c.getDepartment() == null ? "civic" : c.getDepartment().replace('_', ' ');
+            String title = filed ? "New " + dept + " complaint"
+                    : dept + " complaint " + c.getStatus().replace('_', ' ').toLowerCase(java.util.Locale.ROOT);
+            return new ComplaintLiveEvent(c.getId(), title, c.getCategory(), c.getDepartment(), c.getStatus(),
+                    c.getPriority());
+        }
+    }
+
     public record ComplaintCreateRequest(
             @NotBlank String title,
             @NotBlank String description,
