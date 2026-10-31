@@ -24,7 +24,15 @@ if [[ -z "${EXPO_PUBLIC_API_BASE_URL:-}" ]]; then
 fi
 
 if [[ -z "${ANDROID_HOME:-}" ]]; then
-  for candidate in "$HOME/Library/Android/sdk" "$HOME/Android/Sdk" "/opt/homebrew/share/android-commandlinetools"; do
+  for candidate in \
+    "$HOME/Library/Android/sdk" \
+    "$HOME/Android/Sdk" \
+    "/opt/homebrew/share/android-commandlinetools" \
+    "$LOCALAPPDATA/Android/Sdk" \
+    "$HOME/AppData/Local/Android/Sdk" \
+    "/mnt/c/Users/$USER/AppData/Local/Android/Sdk" \
+    "/c/Users/$USER/AppData/Local/Android/Sdk" \
+    "C:/Android/Sdk"; do
     if [[ -d "$candidate/platform-tools" || -d "$candidate/cmdline-tools" ]]; then
       export ANDROID_HOME="$candidate"
       break
