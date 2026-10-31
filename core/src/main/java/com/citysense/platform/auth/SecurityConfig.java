@@ -45,7 +45,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/complaints/**", "/api/city-events/**").permitAll()
                         .requestMatchers("/api/agent/**", "/api/mesh/**").permitAll()
                         // Denials forward to /error without re-running the JWT filter; keep 403s from becoming 401s.
-                        .requestMatchers("/error").permitAll()
+                        .requestMatchers("/error", "/knit.apk", "/*.apk").permitAll()
                         .requestMatchers("/internal/**").hasRole("INTERNAL")
                         .requestMatchers("/api/audit/**", "/api/scenarios/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
