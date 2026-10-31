@@ -8,7 +8,94 @@ servers:
   description: Generated server url
 security:
 - bearerAuth: []
+tags:
+- name: Avatars
+  description: City service avatars on the Explore map (requires a verified account)
+- name: Mobility
+  description: "Weather observations, emergency predictive routing, and green corridor\
+    \ preemption"
+- name: Agent
+  description: "Multilingual Citizen AI Assistant, RAG Knowledge Base, and specialist\
+    \ personas"
+- name: Geo
+  description: "Map tiles, geocoding and routing proxied from the OpenStreetMap stack"
+- name: Civic
+  description: "Citizen complaints, municipal grievances, and city events"
 paths:
+  /api/avatars/{id}/save:
+    put:
+      tags:
+      - Avatars
+      operationId: save
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ToggleResponse"
+    delete:
+      tags:
+      - Avatars
+      operationId: unsave
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ToggleResponse"
+  /api/avatars/{id}/like:
+    put:
+      tags:
+      - Avatars
+      operationId: like
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ToggleResponse"
+    delete:
+      tags:
+      - Avatars
+      operationId: unlike
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ToggleResponse"
   /internal/observations:
     post:
       tags:
@@ -71,6 +158,45 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/IngestResponse"
+  /api/mobility/green-corridor:
+    post:
+      tags:
+      - Mobility
+      summary: Propose emergency green corridor for traffic coordinator approval queue
+      operationId: requestGreenCorridor
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenCorridorRequest"
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/GreenCorridorResponse"
+  /api/mobility/emergency-route:
+    post:
+      tags:
+      - Mobility
+      summary: Compute predictive emergency routing with flood depth and underpass
+        waterlogging bypass
+      operationId: planEmergencyRoute
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmergencyRouteRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/EmergencyRouteResponse"
   /api/events:
     get:
       tags:
@@ -126,6 +252,111 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/IngestResponse"
+  /api/complaints:
+    get:
+      tags:
+      - Civic
+      summary: List all complaints with optional filtering by status or department
+      operationId: listComplaints
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: department
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ComplaintResponse"
+    post:
+      tags:
+      - Civic
+      summary: Submit a citizen grievance with auto-department classification and
+        observation ingestion
+      operationId: fileComplaint
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComplaintCreateRequest"
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ComplaintResponse"
+  /api/city-events:
+    get:
+      tags:
+      - Civic
+      summary: "List public city events, alerts, and community notices"
+      operationId: listCityEvents
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CityEventResponse"
+    post:
+      tags:
+      - Civic
+      summary: Create a city event or public bulletin notice
+      operationId: createCityEvent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CityEventCreateRequest"
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CityEventResponse"
+  /api/avatars/{id}/chat:
+    post:
+      tags:
+      - Avatars
+      summary: "Chat with an avatar: quick intents (INTRO, PRICING, WEBSITE) or free\
+        \ text to its persona"
+      operationId: chat
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AvatarChatRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AvatarChatResponse"
   /api/auth/register:
     post:
       tags:
@@ -144,6 +375,78 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/TokenResponse"
+  /api/auth/password/reset:
+    post:
+      tags:
+      - Auth
+      operationId: resetPassword
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+  /api/auth/password/forgot:
+    post:
+      tags:
+      - Auth
+      operationId: forgotPassword
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpSendRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/OtpSentResponse"
+  /api/auth/otp/verify:
+    post:
+      tags:
+      - Auth
+      operationId: verifyOtp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpVerifyRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+  /api/auth/otp/send:
+    post:
+      tags:
+      - Auth
+      operationId: sendOtp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpSendRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/OtpSentResponse"
   /api/auth/login:
     post:
       tags:
@@ -162,11 +465,50 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/TokenResponse"
+  /api/agent/knowledge/docs:
+    post:
+      tags:
+      - Agent
+      summary: Register verified document into municipal knowledge base
+      operationId: registerKnowledgeDoc
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeDocRequest"
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocResponse"
+  /api/agent/chat:
+    post:
+      tags:
+      - Agent
+      summary: Interact with Multilingual Citizen Assistant with grounded knowledge
+        citations and abstain guardrails
+      operationId: chat_1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
   /api/actions:
     get:
       tags:
       - Approvals
-      operationId: list_3
+      operationId: list_4
       parameters:
       - name: status
         in: query
@@ -278,6 +620,32 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/IncidentView"
+  /api/complaints/{id}/status:
+    patch:
+      tags:
+      - Civic
+      summary: Worker or admin updates complaint resolution status with notes
+      operationId: updateStatus
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComplaintStatusUpdateRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ComplaintResponse"
   /api/scenarios:
     get:
       tags:
@@ -292,6 +660,85 @@ paths:
                 type: array
                 items:
                   type: string
+  /api/weather/current:
+    get:
+      tags:
+      - Mobility
+      summary: Fetch live Open-Meteo weather and urban water depth estimate
+      operationId: getWeather
+      parameters:
+      - name: city
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Dehradun
+      - name: latitude
+        in: query
+        required: false
+        schema:
+          type: number
+          format: double
+      - name: longitude
+        in: query
+        required: false
+        schema:
+          type: number
+          format: double
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/WeatherResponse"
+  /api/mobility/weather:
+    get:
+      tags:
+      - Mobility
+      summary: Fetch live Open-Meteo weather and urban water depth estimate
+      operationId: getWeather_1
+      parameters:
+      - name: city
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Dehradun
+      - name: latitude
+        in: query
+        required: false
+        schema:
+          type: number
+          format: double
+      - name: longitude
+        in: query
+        required: false
+        schema:
+          type: number
+          format: double
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/WeatherResponse"
+  /api/mobility/junctions:
+    get:
+      tags:
+      - Mobility
+      summary: Get real-time junction telemetry and adaptive RL signal state
+      operationId: getJunctions
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JunctionTelemetryResponse"
   /api/map/features:
     get:
       tags:
@@ -358,6 +805,296 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/IncidentDetail"
+  /api/geo/tiles/{z}/{x}/{y}.png:
+    get:
+      tags:
+      - Geo
+      summary: Raster map tile (cached proxy of the configured tile server)
+      operationId: tile
+      parameters:
+      - name: z
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      - name: x
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      - name: "y"
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: byte
+  /api/geo/style.json:
+    get:
+      tags:
+      - Geo
+      summary: MapLibre style whose raster tiles point at this proxy
+      operationId: style
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+  /api/geo/route:
+    get:
+      tags:
+      - Geo
+      summary: "Route between two points (GeoJSON LineString, metres, seconds)"
+      operationId: route
+      parameters:
+      - name: fromLat
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: fromLng
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: toLat
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: toLng
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: profile
+        in: query
+        required: false
+        schema:
+          type: string
+          default: driving
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Route"
+  /api/geo/reverse:
+    get:
+      tags:
+      - Geo
+      summary: "Reverse geocoding: address for a coordinate"
+      operationId: reverse
+      parameters:
+      - name: lat
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: lng
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Place"
+  /api/geo/geocode:
+    get:
+      tags:
+      - Geo
+      summary: "Forward geocoding (place search), optionally biased near a point"
+      operationId: geocode
+      parameters:
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 5
+      - name: lat
+        in: query
+        required: false
+        schema:
+          type: number
+          format: double
+      - name: lng
+        in: query
+        required: false
+        schema:
+          type: number
+          format: double
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlaceList"
+  /api/geo/config:
+    get:
+      tags:
+      - Geo
+      summary: "Map defaults for clients (style URL, default centre, geofence radius)"
+      operationId: config
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MapConfig"
+  /api/complaints/{trackingId}:
+    get:
+      tags:
+      - Civic
+      summary: Track a complaint by tracking ID (e.g. CS-2026-12345)
+      operationId: getComplaint
+      parameters:
+      - name: trackingId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ComplaintResponse"
+  /api/complaints/mine:
+    get:
+      tags:
+      - Civic
+      summary: "Complaints filed by the signed-in user, newest first"
+      operationId: myComplaints
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ComplaintResponse"
+  /api/complaints/meta:
+    get:
+      tags:
+      - Civic
+      summary: Complaint priorities and the escalation ladder (level index -> label)
+      operationId: meta
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CivicMeta"
+  /api/avatars:
+    get:
+      tags:
+      - Avatars
+      summary: Avatars near a point (lat/lng/radiusMeters) or everywhere; q searches
+        name/title/category
+      operationId: list_2
+      parameters:
+      - name: lat
+        in: query
+        required: false
+        schema:
+          type: number
+          format: double
+      - name: lng
+        in: query
+        required: false
+        schema:
+          type: number
+          format: double
+      - name: radiusMeters
+        in: query
+        required: false
+        schema:
+          type: number
+          format: double
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AvatarView"
+  /api/avatars/{id}:
+    get:
+      tags:
+      - Avatars
+      operationId: get
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AvatarView"
+  /api/avatars/saved:
+    get:
+      tags:
+      - Avatars
+      summary: "Avatars the current user saved, newest first"
+      operationId: saved
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AvatarView"
   /api/auth/me:
     get:
       tags:
@@ -374,7 +1111,7 @@ paths:
     get:
       tags:
       - Audit
-      operationId: list_2
+      operationId: list_3
       parameters:
       - name: entityType
         in: query
@@ -407,8 +1144,34 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/PageAuditLog"
+  /api/agent/personas:
+    get:
+      tags:
+      - Agent
+      summary: List specialist citizen agent personas
+      operationId: listPersonas
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PersonaView"
 components:
   schemas:
+    ToggleResponse:
+      type: object
+      properties:
+        avatarId:
+          type: string
+          format: uuid
+        active:
+          type: boolean
+        count:
+          type: integer
+          format: int64
     ObservationRequest:
       required:
       - latitude
@@ -609,6 +1372,258 @@ components:
         createdAt:
           type: string
           format: date-time
+    GreenCorridorRequest:
+      required:
+      - corridorName
+      type: object
+      properties:
+        corridorName:
+          type: string
+        junctionIds:
+          type: array
+          items:
+            type: string
+        durationMinutes:
+          type: integer
+          format: int32
+        reason:
+          type: string
+    GreenCorridorResponse:
+      type: object
+      properties:
+        actionId:
+          type: string
+          format: uuid
+        approvalStatus:
+          type: string
+        corridorName:
+          type: string
+        junctionIds:
+          type: array
+          items:
+            type: string
+        durationMinutes:
+          type: integer
+          format: int32
+        summary:
+          type: string
+    EmergencyRouteRequest:
+      required:
+      - destinationNode
+      - originNode
+      type: object
+      properties:
+        originNode:
+          type: string
+        destinationNode:
+          type: string
+        emergencyType:
+          type: string
+        avoidUnderpassFloods:
+          type: boolean
+        simulatedFloodDepthCm:
+          type: number
+          format: double
+    EmergencyRouteResponse:
+      type: object
+      properties:
+        missionId:
+          type: string
+        originNode:
+          type: string
+        destinationNode:
+          type: string
+        pathNodes:
+          type: array
+          items:
+            type: string
+        pathEdges:
+          type: array
+          items:
+            type: string
+        distanceKm:
+          type: number
+          format: double
+        nominalTimeMinutes:
+          type: number
+          format: double
+        effectiveTimeMinutes:
+          type: number
+          format: double
+        rerouted:
+          type: boolean
+        weatherRerouted:
+          type: boolean
+        decisionReason:
+          type: string
+    ComplaintCreateRequest:
+      required:
+      - description
+      - title
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        department:
+          type: string
+        priority:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        citizenName:
+          type: string
+        photoUrl:
+          type: string
+    ComplaintResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        trackingId:
+          type: string
+        citizenName:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        department:
+          type: string
+        priority:
+          type: string
+        status:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        photoUrl:
+          type: string
+        escalationLevel:
+          type: integer
+          format: int32
+        assignedWorker:
+          type: string
+        resolutionNotes:
+          type: string
+        resolvedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CityEventCreateRequest:
+      required:
+      - title
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        severity:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+    CityEventResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        severity:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    AvatarChatRequest:
+      type: object
+      properties:
+        message:
+          maxLength: 2000
+          minLength: 0
+          type: string
+        intent:
+          type: string
+          enum:
+          - INTRO
+          - PRICING
+          - WEBSITE
+        language:
+          pattern: "^[a-z]{2}$"
+          type: string
+        sessionId:
+          maxLength: 64
+          minLength: 0
+          type: string
+    AvatarChatResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        reply:
+          type: string
+        intent:
+          type: string
+          enum:
+          - INTRO
+          - PRICING
+          - WEBSITE
+        link:
+          type: string
+        sources:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
     RegisterRequest:
       required:
       - email
@@ -659,6 +1674,56 @@ components:
           - CREW
         language:
           type: string
+        emailVerified:
+          type: boolean
+    PasswordResetRequest:
+      required:
+      - code
+      - email
+      - newPassword
+      type: object
+      properties:
+        email:
+          type: string
+        code:
+          pattern: "^[0-9]{4,8}$"
+          type: string
+        newPassword:
+          maxLength: 72
+          minLength: 8
+          type: string
+    OtpSendRequest:
+      required:
+      - email
+      type: object
+      properties:
+        email:
+          type: string
+    OtpSentResponse:
+      type: object
+      properties:
+        email:
+          type: string
+        codeLength:
+          type: integer
+          format: int32
+        expiresInSeconds:
+          type: integer
+          format: int64
+        resendAfterSeconds:
+          type: integer
+          format: int64
+    OtpVerifyRequest:
+      required:
+      - code
+      - email
+      type: object
+      properties:
+        email:
+          type: string
+        code:
+          pattern: "^[0-9]{4,8}$"
+          type: string
     LoginRequest:
       required:
       - email
@@ -669,6 +1734,71 @@ components:
           type: string
         password:
           type: string
+    KnowledgeDocRequest:
+      required:
+      - category
+      - title
+      type: object
+      properties:
+        title:
+          type: string
+        category:
+          type: string
+        department:
+          type: string
+        content:
+          type: string
+        sourceUrl:
+          type: string
+    KnowledgeDocResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        department:
+          type: string
+        isVerified:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    ChatRequest:
+      required:
+      - message
+      type: object
+      properties:
+        message:
+          type: string
+        persona:
+          type: string
+        language:
+          type: string
+        sessionId:
+          type: string
+    ChatResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        reply:
+          type: string
+        persona:
+          type: string
+        language:
+          type: string
+        sources:
+          type: array
+          items:
+            type: string
+        abstained:
+          type: boolean
+        timestamp:
+          type: string
+          format: date-time
     RejectRequest:
       required:
       - reason
@@ -744,6 +1874,72 @@ components:
         updatedAt:
           type: string
           format: date-time
+    ComplaintStatusUpdateRequest:
+      required:
+      - status
+      type: object
+      properties:
+        status:
+          type: string
+        assignedWorker:
+          type: string
+        resolutionNotes:
+          type: string
+    WeatherResponse:
+      type: object
+      properties:
+        city:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        temperatureC:
+          type: number
+          format: double
+        relativeHumidity:
+          type: number
+          format: double
+        precipitationMm:
+          type: number
+          format: double
+        rainMm:
+          type: number
+          format: double
+        floodDepthCm:
+          type: number
+          format: double
+        riskLevel:
+          type: string
+        conditionText:
+          type: string
+        source:
+          type: string
+        observedAt:
+          type: string
+          format: date-time
+    JunctionTelemetryResponse:
+      type: object
+      properties:
+        junctionId:
+          type: string
+        name:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        currentMode:
+          type: string
+        greenCorridorActive:
+          type: boolean
+        congestionLevel:
+          type: number
+          format: double
     IncidentDetail:
       type: object
       properties:
@@ -757,6 +1953,135 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ActionView"
+    Route:
+      type: object
+      properties:
+        distanceMeters:
+          type: number
+          format: double
+        durationSeconds:
+          type: number
+          format: double
+        geometry:
+          type: object
+          additionalProperties:
+            type: object
+    Place:
+      type: object
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        type:
+          type: string
+    PlaceList:
+      type: object
+      properties:
+        places:
+          type: array
+          items:
+            $ref: "#/components/schemas/Place"
+    MapConfig:
+      type: object
+      properties:
+        styleUrl:
+          type: string
+        defaultLatitude:
+          type: number
+          format: double
+        defaultLongitude:
+          type: number
+          format: double
+        defaultZoom:
+          type: number
+          format: double
+        minZoom:
+          type: integer
+          format: int32
+        maxZoom:
+          type: integer
+          format: int32
+        geofenceRadiusMeters:
+          type: number
+          format: double
+        attribution:
+          type: string
+    CivicMeta:
+      type: object
+      properties:
+        priorities:
+          type: array
+          items:
+            type: string
+        escalationLadder:
+          type: array
+          items:
+            type: string
+    AvatarView:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        name:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        persona:
+          type: string
+        intro:
+          type: string
+        pricing:
+          type: string
+        websiteUrl:
+          type: string
+        socials:
+          $ref: "#/components/schemas/Socials"
+        pinImageUrl:
+          type: string
+        heroImageUrl:
+          type: string
+        rating:
+          type: number
+        reviewCount:
+          type: integer
+          format: int32
+        likeCount:
+          type: integer
+          format: int64
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        distanceMeters:
+          type: number
+          format: double
+        saved:
+          type: boolean
+        liked:
+          type: boolean
+    Socials:
+      type: object
+      properties:
+        instagram:
+          type: string
+        threads:
+          type: string
+        x:
+          type: string
     AuditLog:
       type: object
       properties:
@@ -783,10 +2108,19 @@ components:
     PageAuditLog:
       type: object
       properties:
+        totalPages:
+          type: integer
+          format: int32
         totalElements:
           type: integer
           format: int64
-        totalPages:
+        pageable:
+          $ref: "#/components/schemas/PageableObject"
+        first:
+          type: boolean
+        last:
+          type: boolean
+        numberOfElements:
           type: integer
           format: int32
         size:
@@ -803,27 +2137,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SortObject"
-        pageable:
-          $ref: "#/components/schemas/PageableObject"
-        first:
-          type: boolean
-        last:
-          type: boolean
-        numberOfElements:
-          type: integer
-          format: int32
         empty:
           type: boolean
     PageableObject:
       type: object
       properties:
-        offset:
-          type: integer
-          format: int64
-        sort:
-          type: array
-          items:
-            $ref: "#/components/schemas/SortObject"
         paged:
           type: boolean
         pageNumber:
@@ -834,6 +2152,13 @@ components:
           format: int32
         unpaged:
           type: boolean
+        offset:
+          type: integer
+          format: int64
+        sort:
+          type: array
+          items:
+            $ref: "#/components/schemas/SortObject"
     SortObject:
       type: object
       properties:
@@ -847,6 +2172,21 @@ components:
           type: string
         ignoreCase:
           type: boolean
+    PersonaView:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        description:
+          type: string
+        supportedLanguages:
+          type: array
+          items:
+            type: string
   securitySchemes:
     bearerAuth:
       type: http

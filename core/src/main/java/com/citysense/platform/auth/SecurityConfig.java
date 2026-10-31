@@ -31,7 +31,13 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsSource(props)))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register",
+                                "/api/auth/otp/send", "/api/auth/otp/verify",
+                                "/api/auth/password/forgot", "/api/auth/password/reset").permitAll()
+                        // Map rendering: native tile requests carry no JWT. Lookups/routing stay authenticated.
+                        .requestMatchers(HttpMethod.GET, "/api/geo/config", "/api/geo/style.json", "/api/geo/tiles/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/avatars/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/complaints/mine").authenticated()
                         .requestMatchers("/ws/**", "/ws-sockjs/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/actuator/health/**").permitAll()

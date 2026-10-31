@@ -1,11 +1,14 @@
 package com.citysense.civic;
 
+import com.citysense.common.error.ApiException;
+import com.citysense.platform.auth.AuthUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,16 +23,35 @@ import org.springframework.web.bind.annotation.RestController;
 public class CivicController {
 
     private final CivicService civicService;
+    private final CivicProperties civicProps;
 
-    public CivicController(CivicService civicService) {
+    public CivicController(CivicService civicService, CivicProperties civicProps) {
         this.civicService = civicService;
+        this.civicProps = civicProps;
+    }
+
+    @GetMapping("/api/complaints/meta")
+    @Operation(summary = "Complaint priorities and the escalation ladder (level index -> label)")
+    public CivicDtos.CivicMeta meta() {
+        return new CivicDtos.CivicMeta(civicProps.priorities(), civicProps.escalationLadder());
     }
 
     @PostMapping("/api/complaints")
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Submit a citizen grievance with auto-department classification and observation ingestion")
-    public CivicDtos.ComplaintResponse fileComplaint(@Valid @RequestBody CivicDtos.ComplaintCreateRequest req) {
-        return civicService.fileComplaint(req, null);
+    public CivicDtos.ComplaintResponse fileComplaint(@AuthenticationPrincipal AuthUser user,
+                                                     @Valid @RequestBody CivicDtos.ComplaintCreateRequest req) {
+        // Anonymous filing stays allowed; signed-in citizens get the complaint linked to their account.
+        return civicService.fileComplaint(req, user == null ? null : user.id());
+    }
+
+    @GetMapping("/api/complaints/mine")
+    @Operation(summary = "Complaints filed by the signed-in user, newest first")
+    public List<CivicDtos.ComplaintResponse> myComplaints(@AuthenticationPrincipal AuthUser user) {
+        if (user == null) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Sign in required");
+        }
+        return civicService.listMine(user.id());
     }
 
     @GetMapping("/api/complaints")

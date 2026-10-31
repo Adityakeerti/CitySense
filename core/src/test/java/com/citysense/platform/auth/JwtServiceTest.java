@@ -24,6 +24,10 @@ class JwtServiceTest {
         AuthUser parsed = jwt.parse(jwt.issue(user)).orElseThrow();
         assertThat(parsed.id()).isEqualTo(id);
         assertThat(parsed.role()).isEqualTo(Role.ADMIN);
+        assertThat(parsed.emailVerified()).isFalse();
+
+        user.markEmailVerified();
+        assertThat(jwt.parse(jwt.issue(user)).orElseThrow().emailVerified()).isTrue();
     }
 
     @Test

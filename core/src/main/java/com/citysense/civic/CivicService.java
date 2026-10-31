@@ -99,6 +99,12 @@ public class CivicService {
     }
 
     @Transactional(readOnly = true)
+    public List<CivicDtos.ComplaintResponse> listMine(UUID userId) {
+        return complaintRepo.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(CivicDtos.ComplaintResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<CivicDtos.ComplaintResponse> listComplaints(String status, String department) {
         List<Complaint> list;
         if (status != null && !status.isBlank()) {

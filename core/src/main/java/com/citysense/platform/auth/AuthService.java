@@ -19,15 +19,18 @@ public class AuthService {
     private final PasswordEncoder encoder;
     private final JwtService jwt;
     private final AuditService audit;
+    private final OtpService otp;
 
-    public AuthService(UserRepository users, PasswordEncoder encoder, JwtService jwt, AuditService audit) {
+    public AuthService(UserRepository users, PasswordEncoder encoder, JwtService jwt, AuditService audit,
+                       OtpService otp) {
         this.users = users;
         this.encoder = encoder;
         this.jwt = jwt;
         this.audit = audit;
+        this.otp = otp;
     }
 
-    /** Self-registration always creates a CITIZEN; admin and crew accounts are provisioned, never self-assigned. */
+    /** Self-registration always creates an unverified CITIZEN; admin and crew accounts are provisioned, never self-assigned. */
     @Transactional
     public TokenResponse register(RegisterRequest req) {
         if (users.existsByEmailIgnoreCase(req.email())) {
@@ -37,6 +40,7 @@ public class AuthService {
         User user = users.save(new User(req.email().toLowerCase(), encoder.encode(req.password()),
                 req.fullName(), Role.CITIZEN, language));
         audit.record(user.getEmail(), "USER_REGISTERED", "user", user.getId().toString(), "SUCCESS", Map.of());
+        otp.issue(user, OtpPurpose.VERIFY_EMAIL);   // the returned token carries ev=false until the code is verified
         return token(user);
     }
 

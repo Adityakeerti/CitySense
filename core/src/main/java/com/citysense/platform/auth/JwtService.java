@@ -32,6 +32,7 @@ public class JwtService {
                 .subject(user.getId().toString())
                 .claim("email", user.getEmail())
                 .claim("role", user.getRole().name())
+                .claim("ev", user.isEmailVerified())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(ttl)))
                 .signWith(key)
@@ -48,7 +49,9 @@ public class JwtService {
             return Optional.of(new AuthUser(
                     UUID.fromString(claims.getSubject()),
                     claims.get("email", String.class),
-                    Role.valueOf(claims.get("role", String.class))));
+                    Role.valueOf(claims.get("role", String.class)),
+                    // Tokens issued before verification existed carry no claim: treat as unverified.
+                    Boolean.TRUE.equals(claims.get("ev", Boolean.class))));
         } catch (JwtException | IllegalArgumentException e) {
             return Optional.empty();
         }

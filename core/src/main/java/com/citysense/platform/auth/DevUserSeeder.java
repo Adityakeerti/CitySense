@@ -38,7 +38,9 @@ public class DevUserSeeder implements ApplicationRunner {
         if (users.existsByEmailIgnoreCase(email)) {
             return;
         }
-        users.save(new User(email, encoder.encode(props.seed().defaultPassword()), name, role, "en"));
+        User user = new User(email, encoder.encode(props.seed().defaultPassword()), name, role, "en");
+        user.markEmailVerified();   // seeded demo accounts skip the OTP step
+        users.save(user);
         log.warn("Seeded dev user {} ({}) with the default seed password - do not use in production", email, role);
     }
 }

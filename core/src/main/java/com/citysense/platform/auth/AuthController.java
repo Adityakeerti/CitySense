@@ -1,6 +1,10 @@
 package com.citysense.platform.auth;
 
 import com.citysense.platform.auth.AuthDtos.LoginRequest;
+import com.citysense.platform.auth.AuthDtos.OtpSendRequest;
+import com.citysense.platform.auth.AuthDtos.OtpSentResponse;
+import com.citysense.platform.auth.AuthDtos.OtpVerifyRequest;
+import com.citysense.platform.auth.AuthDtos.PasswordResetRequest;
 import com.citysense.platform.auth.AuthDtos.RegisterRequest;
 import com.citysense.platform.auth.AuthDtos.TokenResponse;
 import com.citysense.platform.auth.AuthDtos.UserView;
@@ -21,9 +25,31 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final OtpService otpService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, OtpService otpService) {
         this.authService = authService;
+        this.otpService = otpService;
+    }
+
+    @PostMapping("/otp/send")
+    public OtpSentResponse sendOtp(@Valid @RequestBody OtpSendRequest req) {
+        return otpService.send(req.email());
+    }
+
+    @PostMapping("/otp/verify")
+    public TokenResponse verifyOtp(@Valid @RequestBody OtpVerifyRequest req) {
+        return otpService.verify(req.email(), req.code());
+    }
+
+    @PostMapping("/password/forgot")
+    public OtpSentResponse forgotPassword(@Valid @RequestBody OtpSendRequest req) {
+        return otpService.sendPasswordReset(req.email());
+    }
+
+    @PostMapping("/password/reset")
+    public TokenResponse resetPassword(@Valid @RequestBody PasswordResetRequest req) {
+        return otpService.resetPassword(req.email(), req.code(), req.newPassword());
     }
 
     @PostMapping("/register")
