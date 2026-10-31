@@ -18,11 +18,24 @@ public final class AuthDtos {
 
     public record LoginRequest(@NotBlank @Email String email, @NotBlank String password) {}
 
-    public record UserView(UUID id, String email, String fullName, Role role, String language) {
+    public record UserView(UUID id, String email, String fullName, Role role, String language, boolean emailVerified) {
         static UserView of(User u) {
-            return new UserView(u.getId(), u.getEmail(), u.getFullName(), u.getRole(), u.getLanguage());
+            return new UserView(u.getId(), u.getEmail(), u.getFullName(), u.getRole(), u.getLanguage(),
+                    u.isEmailVerified());
         }
     }
+
+    public record OtpSendRequest(@NotBlank @Email String email) {}
+
+    public record OtpVerifyRequest(@NotBlank @Email String email, @NotBlank @Pattern(regexp = "^[0-9]{4,8}$") String code) {}
+
+    public record PasswordResetRequest(
+            @NotBlank @Email String email,
+            @NotBlank @Pattern(regexp = "^[0-9]{4,8}$") String code,
+            @NotBlank @Size(min = 8, max = 72) String newPassword) {}
+
+    /** Tells the client how to render the OTP screen; the code itself is never returned. */
+    public record OtpSentResponse(String email, int codeLength, long expiresInSeconds, long resendAfterSeconds) {}
 
     public record TokenResponse(String accessToken, String tokenType, long expiresIn, UserView user) {}
 }

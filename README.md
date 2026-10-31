@@ -182,6 +182,12 @@ CitySense/
 
 ---
 
+## 📱 Mobile app (`mobile/`)
+
+React Native (Expo SDK 58, Expo Router, MapLibre) citizen app built from `UI.jpeg` and `assets/`: onboarding → sign up / login → email OTP → Explore map of city-service avatars (geofence, search, chat) plus Townhall (complaints), Saved, Updates (live STOMP) and Settings. It talks **only** to core; maps, geocoding and routing are proxied by core's `/api/geo/*`. Build an APK with `cd mobile && npm run build:apk` — see [mobile/README.md](mobile/README.md).
+
+---
+
 ## ⚡ Ground Rules & Collaboration Protocol
 
 1. **Contracts Before Code:** Spring Boot is the single public gateway. All frontend clients use types generated from `openapi-public.yaml`. Spring calls Python via types from `openapi-internal.yaml`.

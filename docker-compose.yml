@@ -38,6 +38,25 @@ services:
       DEMO_MODE: ${DEMO_MODE:-1}
       CORRELATION_RADIUS_METERS: ${CORRELATION_RADIUS_METERS:-500}
       CORRELATION_WINDOW_MINUTES: ${CORRELATION_WINDOW_MINUTES:-30}
+      # Email OTP over SMTP (unset host = codes printed to the core log when OTP_LOG_FALLBACK=true)
+      SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-}
+      SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH:-true}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:-true}
+      OTP_MAIL_FROM: ${OTP_MAIL_FROM:-no-reply@citysense.local}
+      OTP_LOG_FALLBACK: ${OTP_LOG_FALLBACK:-true}
+      # Map proxy (OpenStreetMap stack by default; see core/README.md)
+      GEO_USER_AGENT: ${GEO_USER_AGENT:-CitySense/0.1 (+https://github.com/Adityakeerti/CitySense)}
+      GEO_TILE_URL_TEMPLATE: ${GEO_TILE_URL_TEMPLATE:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
+      GEO_NOMINATIM_URL: ${GEO_NOMINATIM_URL:-https://nominatim.openstreetmap.org}
+      GEO_OSRM_URL: ${GEO_OSRM_URL:-https://router.project-osrm.org}
+      GEO_PUBLIC_BASE_URL: ${GEO_PUBLIC_BASE_URL:-}
+      GEO_DEFAULT_LAT: ${GEO_DEFAULT_LAT:-30.3243}
+      GEO_DEFAULT_LNG: ${GEO_DEFAULT_LNG:-78.0418}
+      GEO_GEOFENCE_RADIUS_METERS: ${GEO_GEOFENCE_RADIUS_METERS:-2500}
+      SEED_AVATARS: ${SEED_AVATARS:-true}
     ports:
       - "8080:8080"
 

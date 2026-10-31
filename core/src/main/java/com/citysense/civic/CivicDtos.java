@@ -6,6 +6,8 @@ import java.util.UUID;
 
 public class CivicDtos {
 
+    public record CivicMeta(java.util.List<String> priorities, java.util.List<String> escalationLadder) {}
+
     public record ComplaintCreateRequest(
             @NotBlank String title,
             @NotBlank String description,

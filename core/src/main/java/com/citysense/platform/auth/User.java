@@ -35,6 +35,9 @@ public class User {
     @Column(nullable = false)
     private String language = "en";
 
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -55,4 +58,9 @@ public class User {
     public Role getRole() { return role; }
     public String getLanguage() { return language; }
     public Instant getCreatedAt() { return createdAt; }
+    public boolean isEmailVerified() { return emailVerified; }
+
+    public void markEmailVerified() { this.emailVerified = true; }
+
+    public void changePasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 }
