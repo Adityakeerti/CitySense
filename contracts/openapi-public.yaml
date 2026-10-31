@@ -256,7 +256,11 @@ paths:
     get:
       tags:
       - Civic
-      summary: List all complaints with optional filtering by status or department
+      summary: "List complaints, optionally filtered by status and/or department (CREW,\
+        \ ADMIN)"
+      description: "ADMIN: all complaints. CREW: complaints assigned to them plus\
+        \ unassigned FILED/ESCALATED complaints available for assignment; never complaints\
+        \ assigned to other crew members."
       operationId: listComplaints
       parameters:
       - name: status
@@ -270,6 +274,14 @@ paths:
         schema:
           type: string
       responses:
+        "403":
+          description: Not CREW or ADMIN
+          content:
+            application/problem+json: {}
+        "400":
+          description: Unknown status
+          content:
+            application/problem+json: {}
         "200":
           description: OK
           content:
@@ -278,11 +290,15 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ComplaintResponse"
+        "401":
+          description: Missing or invalid JWT (no body)
     post:
       tags:
       - Civic
-      summary: Submit a citizen grievance with auto-department classification and
-        observation ingestion
+      summary: "Submit a grievance (signed in, verified email); it is owned by the\
+        \ caller"
+      description: At most 10 complaints per user in any sliding hour (configurable);
+        the next gets 429.
       operationId: fileComplaint
       requestBody:
         content:
@@ -291,12 +307,33 @@ paths:
               $ref: "#/components/schemas/ComplaintCreateRequest"
         required: true
       responses:
+        "403":
+          description: Email not verified
+          content:
+            application/problem+json: {}
+        "400":
+          description: Validation failed (RFC 9457 problem)
+          content:
+            application/problem+json: {}
         "201":
-          description: Created
+          description: Filed
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ComplaintResponse"
+        "429":
+          description: Filing limit reached; Retry-After gives the seconds until a
+            slot frees up
+          headers:
+            Retry-After:
+              description: Seconds to wait
+              style: simple
+              schema:
+                type: integer
+          content:
+            application/problem+json: {}
+        "401":
+          description: Missing or invalid JWT (no body)
   /api/city-events:
     get:
       tags:
@@ -315,7 +352,7 @@ paths:
     post:
       tags:
       - Civic
-      summary: Create a city event or public bulletin notice
+      summary: Create a city event or public bulletin notice (ADMIN)
       operationId: createCityEvent
       requestBody:
         content:
@@ -325,11 +362,21 @@ paths:
         required: true
       responses:
         "201":
-          description: Created
+          description: Published
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/CityEventResponse"
+        "400":
+          description: Validation failed
+          content:
+            application/problem+json: {}
+        "403":
+          description: Not ADMIN
+          content:
+            application/problem+json: {}
+        "401":
+          description: Missing or invalid JWT (no body)
   /api/avatars/{id}/chat:
     post:
       tags:
@@ -624,7 +671,13 @@ paths:
     patch:
       tags:
       - Civic
-      summary: Worker or admin updates complaint resolution status with notes
+      summary: "Change complaint status: CREW on their own assignments, ADMIN for\
+        \ the full lifecycle"
+      description: "CREW: FILED|ESCALATED->ASSIGNED (self only), ASSIGNED->IN_PROGRESS,\
+        \ IN_PROGRESS->RESOLVED, on complaints assigned to them. ADMIN: FILED->ASSIGNED|REJECTED|ESCALATED,\
+        \ ESCALATED->ASSIGNED|REJECTED, ASSIGNED->ASSIGNED|IN_PROGRESS|REJECTED|FILED,\
+        \ IN_PROGRESS->ASSIGNED|RESOLVED|REJECTED, RESOLVED|REJECTED->FILED. ASSIGNED\
+        \ needs a crew account email; REJECTED needs resolutionNotes."
       operationId: updateStatus
       parameters:
       - name: id
@@ -640,12 +693,32 @@ paths:
               $ref: "#/components/schemas/ComplaintStatusUpdateRequest"
         required: true
       responses:
+        "400":
+          description: "Unknown status, missing worker or reason, or worker is not\
+            \ a crew account"
+          content:
+            application/problem+json: {}
+        "403":
+          description: "Citizen, or crew acting outside their own assignment or allowed\
+            \ statuses"
+          content:
+            application/problem+json: {}
         "200":
-          description: OK
+          description: Changed (audited)
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ComplaintResponse"
+        "404":
+          description: "No complaint with this id, or one the caller may not see (indistinguishable)"
+          content:
+            application/problem+json: {}
+        "409":
+          description: Transition not allowed from the current status
+          content:
+            application/problem+json: {}
+        "401":
+          description: Missing or invalid JWT (no body)
   /api/scenarios:
     get:
       tags:
@@ -978,7 +1051,8 @@ paths:
     get:
       tags:
       - Civic
-      summary: Track a complaint by tracking ID (e.g. CS-2026-12345)
+      summary: "Track a complaint by tracking ID (owner, ADMIN, CREW within their\
+        \ scope; anyone else gets 404)"
       operationId: getComplaint
       parameters:
       - name: trackingId
@@ -993,6 +1067,12 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ComplaintResponse"
+        "401":
+          description: Missing or invalid JWT (no body)
+        "404":
+          description: "Unknown ID, or a complaint the caller may not see (indistinguishable)"
+          content:
+            application/problem+json: {}
   /api/complaints/mine:
     get:
       tags:
