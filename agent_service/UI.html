@@ -371,13 +371,16 @@
       </div>
 
       <div class="panel-title" style="margin-top: 10px;">
-        <span>🎙️ Voice Ingestion (STT)</span>
+        <span>🎙️ Voice Ingestion & Earphone Audio</span>
       </div>
       <div>
         <label>Audio File (.wav, .mp3, .ogg, .webm)</label>
         <input type="file" id="voice-file-input" accept="audio/*">
       </div>
-      <button class="secondary" onclick="uploadAudio()">Transcribe Audio (/api/agent/voice)</button>
+      <div style="display:flex; gap:6px; flex-direction:column;">
+        <button class="secondary" onclick="uploadAudio()">🎙️ Transcribe Audio (Sarvam STT)</button>
+        <button class="secondary" style="border:1px solid #38bdf8; color:#38bdf8;" onclick="testEarphoneAudio()">🎧 Test Earphones Audio (Sarvam TTS)</button>
+      </div>
     </div>
 
     <!-- Center Column: Interactive Chat ("Ask Tab") -->
@@ -602,9 +605,44 @@
         </div>`;
       }
 
-      msgDiv.innerHTML = header + `<div>${escapeHtml(text)}</div>` + sourcesHtml + ctaHtml;
+      let audioBtn = '';
+      if (role !== 'user' && text) {
+        audioBtn = `<div style="margin-top:6px;">
+          <button type="button" class="secondary" style="font-size:0.7rem; padding:3px 8px; display:inline-flex; align-items:center; gap:4px; border:1px solid #38bdf8; color:#38bdf8;" onclick="playAudioResponse(this.getAttribute('data-text'))" data-text="${escapeHtml(text)}">
+            🔊 Listen in Earphones
+          </button>
+        </div>`;
+      }
+
+      msgDiv.innerHTML = header + `<div>${escapeHtml(text)}</div>` + audioBtn + sourcesHtml + ctaHtml;
       chatBox.appendChild(msgDiv);
       chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    async function playAudioResponse(text) {
+      if (!text) return;
+      const lang = document.getElementById('lang-select')?.value || 'hi';
+      try {
+        const res = await fetch(`${API_BASE}/api/agent/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text, language: lang, speaker: 'aditya' })
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const audioUrl = URL.createObjectURL(blob);
+          const audio = new Audio(audioUrl);
+          await audio.play();
+        } else {
+          console.warn('TTS request error:', await res.text());
+        }
+      } catch (err) {
+        console.warn('TTS playback error:', err);
+      }
+    }
+
+    async function testEarphoneAudio() {
+      await playAudioResponse("नमस्ते, सिटी सेंस स्मार्ट सिटी सहायक में आपका स्वागत है। आपकी आवाज और इयरफ़ोन का परीक्षण सफल रहा।");
     }
 
     async function sendChat() {
@@ -612,7 +650,11 @@
       const message = input.value.trim();
       if (!message) return;
 
-      const token = document.getElementById('jwt-input').value.trim();
+      let token = document.getElementById('jwt-input').value.trim();
+      if (!token) {
+        await generateDevToken();
+        token = document.getElementById('jwt-input').value.trim();
+      }
       const agentId = document.getElementById('agent-select').value;
       const language = document.getElementById('lang-select').value;
       const cityId = document.getElementById('city-input').value.trim() || 'dehradun';
@@ -639,7 +681,13 @@
           body: JSON.stringify(payload)
         });
 
-        const data = await res.json();
+        const rawText = await res.text();
+        let data;
+        try {
+          data = JSON.parse(rawText);
+        } catch (e) {
+          data = { detail: rawText };
+        }
         logJSON('/api/agent/chat response', data);
 
         if (!res.ok) {

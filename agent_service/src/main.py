@@ -101,10 +101,20 @@ async def database_error(request: Request, exc: SQLAlchemyError):
     )
 
 
+@app.exception_handler(Exception)
+async def generic_error_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled server exception: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "code": "INTERNAL_SERVER_ERROR"},
+    )
+
+
 from pathlib import Path
 from fastapi.responses import FileResponse, HTMLResponse
 
 from src.admin import router as admin_router  # noqa: E402
+from src.agent.offline import get_all_complaints, resolve_complaint_by_id  # noqa: E402
 from src.agent.router import router as agent_router  # noqa: E402
 from src.auth.router import router as auth_router  # noqa: E402
 from src.health.router import router as health_router  # noqa: E402
@@ -112,6 +122,26 @@ from src.knowledge.router import router as knowledge_router  # noqa: E402
 
 for router in (health_router, auth_router, agent_router, knowledge_router, admin_router):
     app.include_router(router)
+
+
+@app.get("/api/complaints")
+async def list_complaints():
+    return get_all_complaints()
+
+
+@app.post("/api/complaints/{tracking_id}/resolve")
+async def resolve_complaint(tracking_id: str, request: Request):
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    note = body.get("resolution_note", "Work order completed and inspected on site.")
+    updated = resolve_complaint_by_id(tracking_id, note)
+    if not updated:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    return updated
 
 
 @app.get("/ui", include_in_schema=False)
