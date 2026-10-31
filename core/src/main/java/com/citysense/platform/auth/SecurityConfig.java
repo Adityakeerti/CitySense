@@ -37,12 +37,15 @@ public class SecurityConfig {
                         // Map rendering: native tile requests carry no JWT. Lookups/routing stay authenticated.
                         .requestMatchers(HttpMethod.GET, "/api/geo/config", "/api/geo/style.json", "/api/geo/tiles/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/avatars/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/complaints/mine").authenticated()
+                        // Complaints are private: only the option lists and public city bulletins are open.
+                        // Per-complaint ownership, roles and transitions are enforced in CivicController/CivicService.
+                        .requestMatchers(HttpMethod.GET, "/api/complaints/meta", "/api/city-events").permitAll()
+                        .requestMatchers("/api/complaints", "/api/complaints/**",
+                                "/api/city-events", "/api/city-events/**").authenticated()
                         .requestMatchers("/ws/**", "/ws-sockjs/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/actuator/health/**").permitAll()
                         .requestMatchers("/api/weather/**", "/api/mobility/**").permitAll()
-                        .requestMatchers("/api/complaints/**", "/api/city-events/**").permitAll()
                         .requestMatchers("/api/agent/**", "/api/mesh/**").permitAll()
                         // Denials forward to /error without re-running the JWT filter; keep 403s from becoming 401s.
                         .requestMatchers("/error", "/knit.apk", "/*.apk").permitAll()

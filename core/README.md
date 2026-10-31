@@ -31,7 +31,12 @@ Dev users (seeded at startup when `SEED_USERS=true`, password `citysense123`):
 | `GET /api/geo/geocode?q`, `GET /api/geo/reverse?lat&lng`, `GET /api/geo/route?from…&to…` | any | Nominatim search / reverse and OSRM routing, proxied |
 | `GET /api/avatars?lat&lng&radiusMeters&q`, `GET /api/avatars/{id}`, `GET /api/avatars/saved` | verified | City-service avatars on the Explore map (PostGIS radius search) |
 | `PUT/DELETE /api/avatars/{id}/save`, `PUT/DELETE /api/avatars/{id}/like`, `POST /api/avatars/{id}/chat` | verified | Saves, likes, chat (`intent` INTRO/PRICING/WEBSITE answered from the avatar record; free text → persona) |
-| `GET /api/complaints/mine`, `GET /api/complaints/meta` | any / public | The caller's complaints; priorities + escalation ladder labels (config) |
+| `GET /api/complaints/meta` | public | Priorities + escalation ladder labels (config) |
+| `POST /api/complaints`, `GET /api/complaints/mine` | verified / any | File a complaint (owned by the caller; at most 10 per user per sliding hour, then 429 with `Retry-After`); the caller's own complaints |
+| `GET /api/complaints/{trackingId}` | owner, ADMIN, CREW (scoped) | Track one complaint; anyone else gets the same 404 as an unknown ID |
+| `GET /api/complaints?status&department` | ADMIN / CREW (scoped) | ADMIN: all complaints. CREW: their own assignments plus the unassigned `FILED`/`ESCALATED` queue, never other crew members' work |
+| `PATCH /api/complaints/{id}/status` | CREW, ADMIN | Status changes per the rules below; every change is audited |
+| `GET /api/city-events`, `POST /api/city-events` | public / ADMIN | Public city bulletins |
 | `POST /api/events`, `GET /api/events` | ADMIN, CREW / any | Inject or list observations |
 | `POST /internal/observations`, `POST /internal/actions` | ai-service (`X-Internal-Key`) | Python pushes observations / proposes actions |
 | `GET /api/incidents`, `GET /api/incidents/{id}`, `PATCH /api/incidents/{id}/status` | any / any / ADMIN | Ranked incidents, drawer detail, OPEN→ACKNOWLEDGED→RESOLVED |
@@ -39,7 +44,20 @@ Dev users (seeded at startup when `SEED_USERS=true`, password `citysense123`):
 | `GET /api/audit?entityType&entityId` | ADMIN | Append-only audit log |
 | `GET /api/scenarios`, `POST /api/scenarios/{rain\|flood\|crash\|congestion}` | ADMIN | Demo injection, all labelled `SIMULATED` |
 | `GET /api/map/features` | any | GeoJSON for live map |
-| STOMP `/ws` (SockJS: `/ws-sockjs`), topic `/topic/city-events` | — | `{type, entityId, data, timestamp}`; types: `OBSERVATION_CREATED`, `INCIDENT_CREATED/UPDATED`, `ACTION_PENDING/AUTO_EXECUTED/APPROVED/REJECTED` |
+| STOMP `/ws` (SockJS: `/ws-sockjs`), topic `/topic/city-events` | — | `{type, entityId, data, timestamp}`; types: `OBSERVATION_CREATED`, `INCIDENT_CREATED/UPDATED`, `ACTION_PENDING/AUTO_EXECUTED/APPROVED/REJECTED`, `COMPLAINT_FILED/STATUS_UPDATED/RESOLVED`, `CITY_EVENT_CREATED`. `data` is a **public summary** (per-type field allow-list in `LiveEventRedactor`); fetch details over REST |
+
+### Complaint status rules
+
+Enforced on the server (`ComplaintAccessPolicy`); citizens, including the owner, cannot change status.
+
+| Role | Allowed changes |
+|---|---|
+| CREW | `FILED`/`ESCALATED` → `ASSIGNED` (assigns the complaint to themselves; must be unassigned) · `ASSIGNED` → `IN_PROGRESS` · `IN_PROGRESS` → `RESOLVED`, the last two only on complaints assigned to them |
+| ADMIN | `FILED` → `ASSIGNED`/`REJECTED`/`ESCALATED` · `ESCALATED` → `ASSIGNED`/`REJECTED` · `ASSIGNED` → `ASSIGNED` (reassign)/`IN_PROGRESS`/`REJECTED`/`FILED` · `IN_PROGRESS` → `ASSIGNED`/`RESOLVED`/`REJECTED` · `RESOLVED`/`REJECTED` → `FILED` (reopen) |
+
+`ASSIGNED` takes a crew account's email in `assignedWorker`; `REJECTED` needs a reason in `resolutionNotes`. Unknown statuses are 400, other illegal moves 409. A complaint outside a crew member's scope (assigned to someone else) returns 404 for reads and status changes alike.
+
+The filing limit is configurable with `COMPLAINT_FILING_LIMIT_MAX` (default `10`) and `COMPLAINT_FILING_LIMIT_WINDOW` (ISO-8601 duration, default `PT1H`).
 
 ## Mobile support (maps, OTP, avatars)
 

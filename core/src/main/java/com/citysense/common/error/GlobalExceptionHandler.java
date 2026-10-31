@@ -3,8 +3,10 @@ package com.citysense.common.error;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -18,6 +20,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ApiException.class)
     ProblemDetail handleApi(ApiException ex) {
         return ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+    }
+
+    /** 429 keeps the problem body and adds Retry-After (whole seconds, at least 1). */
+    @ExceptionHandler(TooManyRequestsException.class)
+    ResponseEntity<ProblemDetail> handleTooMany(TooManyRequestsException ex) {
+        long seconds = Math.max(1, ex.retryAfter() == null ? 1 : ex.retryAfter().toSeconds());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(seconds))
+                .body(ProblemDetail.forStatusAndDetail(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
