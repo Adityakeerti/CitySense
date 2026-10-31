@@ -234,6 +234,19 @@ async def offline_chat(
     )
     lang = "hi" if is_hindi else "en"
 
+    # Guardrail Check: Input Safety, Scope Classification & Polite Refusal
+    from src.agent.guardrails import QueryScope, build_polite_refusal, classify_scope
+    scope_result = classify_scope(request.message, lang)
+
+    if scope_result.scope in (QueryScope.INJECTION, QueryScope.CIVIC_GREETING, QueryScope.OUT_OF_SCOPE):
+        refusal = build_polite_refusal(scope_result.scope, lang, scope_result.detected_topic)
+        return refusal.to_agent_response(
+            session_id=session_id,
+            message_id=message_id,
+            agent_id=agent_id,
+            agent_name=agent_name,
+        )
+
     # 1. Action Check: Is this a complaint or service request to lodge?
     is_complaint = detect_complaint_intent(request.message)
     is_reporting = any(w in request.message.lower() for w in [
