@@ -10,9 +10,12 @@ import { AuthHeader } from "../components/AuthHeader";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { OtpInput } from "../components/OtpInput";
+import { LinkText } from "../components/LinkText";
 import { ErrorBanner } from "../components/StateViews";
 import { TextField } from "../components/TextField";
 import { mmss, useCountdown } from "../hooks/useCountdown";
+import { FadeIn } from "../motion/FadeIn";
+import { colors } from "../theme";
 
 /** Two steps on one screen: request a reset code, then set a new password with it. */
 export default function Forgot() {
@@ -71,7 +74,8 @@ export default function Forgot() {
               keyboardType="email-address"
             />
             {sent ? (
-              <>
+              // Second step arrives in place of the send button; it eases in so the change reads as progress.
+              <FadeIn>
                 <Text style={[styles.switch, { marginTop: 0, marginBottom: 12, textAlign: "left" }]}>
                   If that email has an account, a {sent.length}-digit code is on its way.
                 </Text>
@@ -86,10 +90,10 @@ export default function Forgot() {
                 />
                 {error ? <ErrorBanner message={error} /> : null}
                 <Button title="Set new password" onPress={reset} loading={busy} style={{ marginTop: 8 }} compact />
-                <Text style={styles.link} onPress={left > 0 ? undefined : request}>
+                <LinkText style={[styles.link, left > 0 && { color: colors.textMuted }]} containerStyle={{ alignSelf: "flex-start" }} onPress={left > 0 ? undefined : request}>
                   Resend code {left > 0 ? `(${mmss(left)})` : ""}
-                </Text>
-              </>
+                </LinkText>
+              </FadeIn>
             ) : (
               <>
                 {error ? <ErrorBanner message={error} /> : null}

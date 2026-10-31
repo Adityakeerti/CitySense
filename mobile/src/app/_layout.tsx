@@ -14,9 +14,13 @@ import { StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
 import { config, isConfigured } from "../config";
+import { duration, useMotion } from "../motion";
+import { splashHiding } from "../motion/splash";
 import { colors } from "../theme";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+// Dissolve into the first screen instead of cutting (Android fades by default; this matches iOS and the timing).
+SplashScreen.setOptions({ fade: true, duration: duration.base });
 
 function RootStack() {
   const { ready } = useAuth();
@@ -28,14 +32,18 @@ function RootStack() {
     Urbanist_700Bold,
   });
   const loaded = ready && fontsLoaded;
+  // Native push transitions stay as they are; reduce motion swaps the slide for a cross-fade.
+  const { stackAnimation } = useMotion();
 
   useEffect(() => {
-    if (loaded) SplashScreen.hideAsync().catch(() => {});
+    if (!loaded) return;
+    splashHiding(duration.base);
+    SplashScreen.hideAsync().catch(() => {});
   }, [loaded]);
 
   if (!loaded) return null;
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface }, animation: "slide_from_right" }}>
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface }, animation: stackAnimation }}>
       <Stack.Screen name="(tabs)" options={{ animation: "fade" }} />
     </Stack>
   );

@@ -1,35 +1,43 @@
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { FadeIn } from "../motion/FadeIn";
+import { loadingDelay } from "../motion/tokens";
 import { colors, fonts } from "../theme";
 import { Button } from "./Button";
+import { LinkText } from "./LinkText";
 
+/** Spinner that only shows when loading is actually slow, so quick responses never flash it. */
 export function Loading() {
   return (
-    <View style={styles.center}>
-      <ActivityIndicator color={colors.primary} />
+    <View style={styles.center} accessibilityLabel="Loading" accessibilityRole="progressbar">
+      <FadeIn delay={loadingDelay}>
+        <ActivityIndicator color={colors.primary} />
+      </FadeIn>
     </View>
   );
 }
 
 export function Empty({ title, body, action }: { title: string; body?: string; action?: { label: string; onPress: () => void } }) {
   return (
-    <View style={styles.center}>
+    <FadeIn style={styles.center}>
       <Text style={styles.title}>{title}</Text>
       {body ? <Text style={styles.body}>{body}</Text> : null}
       {action ? <Button title={action.label} onPress={action.onPress} compact style={{ marginTop: 16 }} /> : null}
-    </View>
+    </FadeIn>
   );
 }
 
 export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <View style={styles.banner}>
-      <Text style={styles.bannerText}>{message}</Text>
+    <FadeIn style={styles.banner}>
+      <Text style={styles.bannerText} accessibilityLiveRegion="polite">
+        {message}
+      </Text>
       {onRetry ? (
-        <Text style={styles.retry} onPress={onRetry} accessibilityRole="button">
+        <LinkText style={styles.retry} onPress={onRetry}>
           Retry
-        </Text>
+        </LinkText>
       ) : null}
-    </View>
+    </FadeIn>
   );
 }
 

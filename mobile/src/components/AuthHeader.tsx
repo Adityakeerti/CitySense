@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { Tap } from "../motion/Tap";
 import { colors, fonts } from "../theme";
 
 /** `fallback` is where Back goes when there is no history (e.g. the screen was opened from a cold start). */
@@ -9,9 +10,9 @@ export function AuthHeader({ title, back = true, fallback = "/welcome" }: { titl
   return (
     <View style={styles.row}>
       {back ? (
-        <Pressable onPress={goBack} hitSlop={12} accessibilityLabel="Back" style={styles.back}>
+        <Tap feedback="dim" onPress={goBack} hitSlop={12} accessibilityLabel="Back" style={styles.back}>
           <Ionicons name="chevron-back" size={24} color={colors.text} />
-        </Pressable>
+        </Tap>
       ) : null}
       <Text style={styles.title} accessibilityRole="header">
         {title}

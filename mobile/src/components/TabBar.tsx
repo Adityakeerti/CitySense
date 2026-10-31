@@ -1,6 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useRef } from "react";
+import { Animated, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { duration, timing, useMotion } from "../motion";
+import { Tap } from "../motion/Tap";
 import { colors, fonts } from "../theme";
 
 export interface TabItem {
@@ -23,25 +26,46 @@ export function TabBar({
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-      {items.map((t) => {
-        const active = t.name === activeName;
-        return (
-          <Pressable
-            key={t.name}
-            style={styles.item}
-            onPress={() => onSelect(t.name)}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: active }}
-            accessibilityLabel={t.label}
-          >
-            <View style={[styles.pill, active && styles.pillActive]}>
-              <Ionicons name={active ? t.iconActive : t.icon} size={20} color={active ? colors.tabActive : "#4A4A55"} />
-            </View>
-            <Text style={[styles.label, active && styles.labelActive]}>{t.label}</Text>
-          </Pressable>
-        );
-      })}
+      {items.map((t) => (
+        <Tab key={t.name} item={t} active={t.name === activeName} onPress={() => onSelect(t.name)} />
+      ))}
     </View>
+  );
+}
+
+function Tab({ item, active, onPress }: { item: TabItem; active: boolean; onPress: () => void }) {
+  const { pillFrom } = useMotion();
+  // `on`: the selected pill grows out from the icon. `press`: a faint pill shows under the finger before release.
+  const on = useRef(new Animated.Value(active ? 1 : 0)).current;
+  const press = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    timing(on, active ? 1 : 0, { duration: duration.fast, curve: "move" }).start();
+  }, [active, on]);
+
+  const pillStyle = useMemo(
+    () => ({ opacity: on, transform: [{ scaleX: on.interpolate({ inputRange: [0, 1], outputRange: [pillFrom, 1] }) }] }),
+    [on, pillFrom],
+  );
+
+  return (
+    <Tap
+      feedback="none"
+      style={styles.item}
+      onPress={onPress}
+      onPressIn={() => timing(press, 1, { duration: duration.pressIn }).start()}
+      onPressOut={() => timing(press, 0, { duration: duration.pressOut }).start()}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={item.label}
+    >
+      <View style={styles.pill}>
+        <Animated.View style={[StyleSheet.absoluteFill, styles.pillPress, { opacity: press }]} />
+        <Animated.View style={[StyleSheet.absoluteFill, styles.pillActive, pillStyle]} />
+        <Ionicons name={active ? item.iconActive : item.icon} size={20} color={active ? colors.tabActive : "#4A4A55"} />
+      </View>
+      <Text style={[styles.label, active && styles.labelActive]}>{item.label}</Text>
+    </Tap>
   );
 }
 
@@ -54,8 +78,9 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   item: { flex: 1, alignItems: "center", gap: 2 },
-  pill: { width: 52, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  pillActive: { backgroundColor: colors.tabActiveBg },
+  pill: { width: 52, height: 28, alignItems: "center", justifyContent: "center" },
+  pillPress: { borderRadius: 14, backgroundColor: "rgba(15, 23, 42, 0.06)" },
+  pillActive: { borderRadius: 14, backgroundColor: colors.tabActiveBg },
   label: { fontFamily: fonts.medium, fontSize: 11, color: "#4A4A55" },
   labelActive: { color: colors.tabActive, fontFamily: fonts.bold },
 });

@@ -6,9 +6,11 @@ import { errorMessage } from "../../api/client";
 import { incidentApi } from "../../api/endpoints";
 import type { Incident, LiveMessage } from "../../api/types";
 import { ScreenHeader } from "../../components/ScreenHeader";
-import { Empty, ErrorBanner } from "../../components/StateViews";
+import { Empty, ErrorBanner, Loading } from "../../components/StateViews";
 import { StatusBadge } from "../../components/StatusBadge";
 import { useLiveEvents } from "../../hooks/useLiveEvents";
+import { animateNextLayout } from "../../motion";
+import { FadeIn, useFirstBatch } from "../../motion/FadeIn";
 import { colors, fonts, radius } from "../../theme";
 import { timeAgo } from "../../utils/geo";
 
@@ -23,16 +25,22 @@ function describe(m: LiveMessage): { title: string; body: string } {
 }
 
 export default function Updates() {
-  const [incidents, setIncidents] = useState<Incident[]>([]);
+  // null until the first response, so "All clear" never flashes before data arrives.
+  const [incidents, setIncidents] = useState<Incident[] | null>(null);
   const [live, setLive] = useState<LiveMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const firstBatch = useFirstBatch(incidents !== null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { live?: boolean }) => {
     setError(null);
     try {
-      setIncidents(await incidentApi.list());
+      const list = await incidentApi.list();
+      // A live change may add or drop rows; let the list settle smoothly instead of jumping.
+      if (opts?.live) animateNextLayout();
+      setIncidents(list);
     } catch (e) {
+      setIncidents((prev) => prev ?? []);
       setError(errorMessage(e));
     }
   }, []);
@@ -45,9 +53,10 @@ export default function Updates() {
 
   const connected = useLiveEvents((m) => {
     if (!CITIZEN_EVENT.test(m.type)) return;
-    // One row per entity: the newest event replaces older ones.
+    // One row per entity: the newest event replaces older ones. Existing rows glide down to make room.
+    animateNextLayout();
     setLive((prev) => [m, ...prev.filter((p) => p.entityId !== m.entityId)].slice(0, MAX_LIVE));
-    if (m.type.startsWith("INCIDENT")) void load();
+    if (m.type.startsWith("INCIDENT")) void load({ live: true });
   });
 
   return (
@@ -64,11 +73,11 @@ export default function Updates() {
       />
       {error ? (
         <View style={{ paddingHorizontal: 20 }}>
-          <ErrorBanner message={error} onRetry={load} />
+          <ErrorBanner message={error} onRetry={() => void load()} />
         </View>
       ) : null}
       <FlatList
-        data={incidents}
+        data={incidents ?? []}
         keyExtractor={(i) => i.id}
         contentContainerStyle={styles.content}
         refreshControl={
@@ -85,10 +94,11 @@ export default function Updates() {
           live.length > 0 ? (
             <View style={{ gap: 8, marginBottom: 12 }}>
               <Text style={styles.section}>Just now</Text>
-              {live.map((m, i) => {
+              {live.map((m) => {
                 const { title, body } = describe(m);
                 return (
-                  <View key={`${m.entityId}-${i}`} style={styles.liveItem}>
+                  // Keyed by entity (one row each), so an update re-orders the row instead of remounting the list.
+                  <FadeIn key={m.entityId} style={styles.liveItem}>
                     <Ionicons name="flash" size={16} color={colors.primary} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.itemTitle} numberOfLines={1}>
@@ -98,7 +108,7 @@ export default function Updates() {
                         {body} · {timeAgo(m.timestamp)}
                       </Text>
                     </View>
-                  </View>
+                  </FadeIn>
                 );
               })}
               <Text style={styles.section}>Active incidents</Text>
@@ -107,10 +117,12 @@ export default function Updates() {
             <Text style={[styles.section, { marginBottom: 8 }]}>Active incidents</Text>
           )
         }
-        ListEmptyComponent={<Empty title="All clear" body="No active incidents reported near the city right now." />}
+        ListEmptyComponent={
+          incidents === null ? <Loading /> : <Empty title="All clear" body="No active incidents reported near the city right now." />
+        }
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-        renderItem={({ item }) => (
-          <View style={styles.item}>
+        renderItem={({ item, index }) => (
+          <FadeIn animate={firstBatch()} index={index} style={styles.item}>
             <View style={[styles.sev, { backgroundColor: item.severity >= 4 ? colors.danger : item.severity >= 3 ? colors.warning : colors.accentBlue }]}>
               <Text style={styles.sevText}>{item.severity}</Text>
             </View>
@@ -126,7 +138,7 @@ export default function Updates() {
               </Text>
             </View>
             <StatusBadge value={item.status} />
-          </View>
+          </FadeIn>
         )}
       />
     </View>

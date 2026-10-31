@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, Text } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { errorMessage } from "../api/client";
 import { authApi } from "../api/endpoints";
@@ -8,6 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { AuthHeader } from "../components/AuthHeader";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { LinkText } from "../components/LinkText";
 import { ErrorBanner } from "../components/StateViews";
 import { TextField } from "../components/TextField";
 import { authStyles as styles } from "../components/authStyles";
@@ -63,16 +64,16 @@ export default function Login() {
             />
             {error ? <ErrorBanner message={error} /> : null}
             <Button title="Sign In" onPress={submit} loading={busy} style={{ marginTop: 8 }} compact />
-            <Text style={styles.link} onPress={() => router.push("/forgot")} accessibilityRole="link">
+            <LinkText style={styles.link} containerStyle={{ alignSelf: "flex-start" }} onPress={() => router.push("/forgot")}>
               Forgot password?
-            </Text>
+            </LinkText>
           </Card>
-          <Text style={styles.switch}>
-            New here?{" "}
-            <Text style={styles.switchLink} onPress={() => router.replace("/signup")}>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchText}>New here? </Text>
+            <LinkText style={styles.switchLink} onPress={() => router.replace("/signup")}>
               Create an account
-            </Text>
-          </Text>
+            </LinkText>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

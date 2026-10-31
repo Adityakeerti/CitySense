@@ -1,16 +1,19 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { errorMessage } from "../../api/client";
 import { civicApi, geoApi } from "../../api/endpoints";
 import { useAuth } from "../../auth/AuthContext";
 import { AuthHeader } from "../../components/AuthHeader";
 import { Button } from "../../components/Button";
+import { LinkText } from "../../components/LinkText";
 import { ErrorBanner } from "../../components/StateViews";
 import { TextField } from "../../components/TextField";
 import { useUserLocation } from "../../hooks/useUserLocation";
+import { FadeIn } from "../../motion/FadeIn";
+import { Tap } from "../../motion/Tap";
 import { colors, fonts, radius } from "../../theme";
 
 export default function NewComplaint() {
@@ -81,11 +84,12 @@ export default function NewComplaint() {
           />
 
           {priorities.length > 0 && (
-            <>
+            // Priorities come from core after the form is up; ease them in rather than pushing content down abruptly.
+            <FadeIn>
               <Text style={styles.label}>Priority</Text>
               <View style={styles.chips}>
                 {priorities.map((p) => (
-                  <Pressable
+                  <Tap
                     key={p}
                     onPress={() => setPriority(p)}
                     style={[styles.chip, priority === p && styles.chipActive]}
@@ -93,10 +97,10 @@ export default function NewComplaint() {
                     accessibilityState={{ selected: priority === p }}
                   >
                     <Text style={[styles.chipText, priority === p && styles.chipTextActive]}>{p.toLowerCase()}</Text>
-                  </Pressable>
+                  </Tap>
                 ))}
               </View>
-            </>
+            </FadeIn>
           )}
 
           <Text style={styles.label}>Location</Text>
@@ -110,9 +114,9 @@ export default function NewComplaint() {
                   : "Location unavailable"}
             </Text>
             {!coords && status !== "pending" ? (
-              <Text style={styles.retry} onPress={() => void refresh()}>
+              <LinkText style={styles.retry} onPress={() => void refresh()}>
                 Retry
-              </Text>
+              </LinkText>
             ) : null}
           </View>
           <Text style={styles.hint}>The department is picked automatically from your description.</Text>

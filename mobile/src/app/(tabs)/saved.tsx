@@ -1,19 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
+import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
 import { errorMessage } from "../../api/client";
 import { avatarApi } from "../../api/endpoints";
 import type { Avatar } from "../../api/types";
 import { AvatarRow } from "../../components/AvatarRow";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { Empty, ErrorBanner, Loading } from "../../components/StateViews";
+import { animateNextLayout } from "../../motion";
+import { FadeIn, useFirstBatch } from "../../motion/FadeIn";
+import { Tap } from "../../motion/Tap";
 import { colors } from "../../theme";
 
 export default function Saved() {
   const [items, setItems] = useState<Avatar[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const firstBatch = useFirstBatch(items !== null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -32,6 +36,8 @@ export default function Saved() {
   );
 
   const unsave = async (a: Avatar) => {
+    // Rows below close the gap smoothly instead of jumping up.
+    animateNextLayout();
     setItems((list) => list?.filter((x) => x.id !== a.id) ?? null);
     try {
       await avatarApi.setSaved(a.id, false);
@@ -74,16 +80,18 @@ export default function Saved() {
               action={{ label: "Explore the map", onPress: () => router.navigate("/explore") }}
             />
           }
-          renderItem={({ item }) => (
-            <AvatarRow
-              avatar={item}
-              onPress={() => router.push({ pathname: "/avatar/[id]", params: { id: item.id } })}
-              right={
-                <Pressable onPress={() => unsave(item)} hitSlop={10} accessibilityLabel={`Remove ${item.name} from saved`}>
-                  <Ionicons name="bookmark" size={22} color={colors.primary} />
-                </Pressable>
-              }
-            />
+          renderItem={({ item, index }) => (
+            <FadeIn animate={firstBatch()} index={index}>
+              <AvatarRow
+                avatar={item}
+                onPress={() => router.push({ pathname: "/avatar/[id]", params: { id: item.id } })}
+                right={
+                  <Tap feedback="dim" onPress={() => unsave(item)} hitSlop={10} accessibilityLabel={`Remove ${item.name} from saved`}>
+                    <Ionicons name="bookmark" size={22} color={colors.primary} />
+                  </Tap>
+                }
+              />
+            </FadeIn>
           )}
         />
       )}

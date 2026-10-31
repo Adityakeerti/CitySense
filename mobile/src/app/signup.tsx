@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, Text } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { errorMessage } from "../api/client";
 import { authApi } from "../api/endpoints";
@@ -8,6 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { AuthHeader } from "../components/AuthHeader";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { LinkText } from "../components/LinkText";
 import { ErrorBanner } from "../components/StateViews";
 import { TextField } from "../components/TextField";
 import { authStyles as styles } from "../components/authStyles";
@@ -65,12 +66,12 @@ export default function SignUp() {
             {error ? <ErrorBanner message={error} /> : null}
             <Button title="Create account" onPress={submit} loading={busy} style={{ marginTop: 8 }} compact />
           </Card>
-          <Text style={styles.switch}>
-            Already have an account?{" "}
-            <Text style={styles.switchLink} onPress={() => router.replace("/login")}>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchText}>Already have an account? </Text>
+            <LinkText style={styles.switchLink} onPress={() => router.replace("/login")}>
               Login
-            </Text>
-          </Text>
+            </LinkText>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

@@ -3,7 +3,7 @@ import { ExploreMap } from "../../components/ExploreMap";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { errorMessage } from "../../api/client";
 import { avatarApi, geoApi } from "../../api/endpoints";
@@ -12,6 +12,9 @@ import { ErrorBanner, Loading } from "../../components/StateViews";
 import { absoluteUrl } from "../../config";
 import { useMapConfig } from "../../hooks/useMapConfig";
 import { type LatLng, useUserLocation } from "../../hooks/useUserLocation";
+import { useMotion } from "../../motion";
+import { FadeIn } from "../../motion/FadeIn";
+import { Tap } from "../../motion/Tap";
 import { colors, fonts, radius } from "../../theme";
 import { boundsAround, circlePolygon, formatDistance } from "../../utils/geo";
 
@@ -19,6 +22,7 @@ type Result = { kind: "avatar"; avatar: Avatar } | { kind: "place"; place: Place
 
 export default function Explore() {
   const insets = useSafeAreaInsets();
+  const { mapDuration } = useMotion();
   const camera = useRef<any>(null);
   const { config, error: configError, reload } = useMapConfig();
   const { coords, status: locStatus, refresh: refreshLocation } = useUserLocation();
@@ -53,15 +57,16 @@ export default function Explore() {
   }, [loadNearby]);
 
   // Frame the whole geofence (as in the mockup) rather than a fixed zoom, whatever radius core sets.
+  // One camera timing for every move; under reduce motion the camera jumps instead of flying.
   const frameGeofence = useCallback(
-    (center: LatLng, duration = 800) => {
+    (center: LatLng) => {
       if (!config) return;
       camera.current?.fitBounds(boundsAround(center.latitude, center.longitude, config.geofenceRadiusMeters), {
         padding: { top: 140, bottom: 90, left: 24, right: 24 },
-        duration,
+        duration: mapDuration,
       });
     },
-    [config],
+    [config, mapDuration],
   );
 
   useEffect(() => {
@@ -101,12 +106,12 @@ export default function Explore() {
   const goToPlace = (p: Place) => {
     setQuery("");
     setPlacePin(p);
-    camera.current?.flyTo({ center: [p.longitude, p.latitude], zoom: 15, duration: 900 });
+    camera.current?.flyTo({ center: [p.longitude, p.latitude], zoom: 15, duration: mapDuration });
   };
 
   const recenter = async () => {
     const pos = (await refreshLocation()) ?? origin;
-    if (pos) frameGeofence(pos, 700);
+    if (pos) frameGeofence(pos);
   };
 
   if (configError) {
@@ -146,13 +151,15 @@ export default function Explore() {
           {searching ? (
             <ActivityIndicator size="small" color={colors.primary} />
           ) : query ? (
-            <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityLabel="Clear search">
+            <Tap feedback="dim" onPress={() => setQuery("")} hitSlop={10} accessibilityLabel="Clear search">
               <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-            </Pressable>
+            </Tap>
           ) : null}
         </View>
-        {query.trim().length >= 2 && !searching && (
-          <View style={styles.results}>
+        {/* Previous results stay up while the next search runs (the bar shows the spinner), so the panel
+            doesn't blink on every pause in typing. It drops down from the bar once, when it first opens. */}
+        {query.trim().length >= 2 && (results.length > 0 || !searching) && (
+          <FadeIn from="above" style={styles.results}>
             {results.length === 0 ? (
               <Text style={styles.noResults}>No avatars or places match “{query.trim()}”</Text>
             ) : (
@@ -162,7 +169,7 @@ export default function Explore() {
                 keyExtractor={(r, i) => (r.kind === "avatar" ? r.avatar.id : `p${i}`)}
                 renderItem={({ item }) =>
                   item.kind === "avatar" ? (
-                    <Pressable style={styles.resultRow} onPress={() => openAvatar(item.avatar)}>
+                    <Tap feedback="highlight" style={styles.resultRow} onPress={() => openAvatar(item.avatar)} accessibilityLabel={`${item.avatar.name}, ${item.avatar.title}`}>
                       <Image source={{ uri: absoluteUrl(item.avatar.pinImageUrl) }} style={styles.resultImg} contentFit="contain" />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.resultTitle}>{item.avatar.name}</Text>
@@ -171,9 +178,9 @@ export default function Explore() {
                           {item.avatar.distanceMeters != null ? ` · ${formatDistance(item.avatar.distanceMeters)}` : ""}
                         </Text>
                       </View>
-                    </Pressable>
+                    </Tap>
                   ) : (
-                    <Pressable style={styles.resultRow} onPress={() => goToPlace(item.place)}>
+                    <Tap feedback="highlight" style={styles.resultRow} onPress={() => goToPlace(item.place)} accessibilityLabel={item.place.displayName}>
                       <View style={[styles.resultImg, styles.placeIcon]}>
                         <Ionicons name="map-outline" size={18} color={colors.primary} />
                       </View>
@@ -183,18 +190,20 @@ export default function Explore() {
                           {item.place.displayName}
                         </Text>
                       </View>
-                    </Pressable>
+                    </Tap>
                   )
                 }
               />
             )}
-          </View>
+          </FadeIn>
         )}
         {loadError ? <ErrorBanner message={loadError} onRetry={loadNearby} /> : null}
         {!coords && locStatus !== "pending" && !query ? (
-          <Text style={styles.notice}>
-            {locStatus === "denied" ? "Location permission is off" : "Can't get your location"} — showing avatars around the city centre.
-          </Text>
+          <FadeIn style={{ alignSelf: "flex-start" }}>
+            <Text style={styles.notice}>
+              {locStatus === "denied" ? "Location permission is off" : "Can't get your location"} — showing avatars around the city centre.
+            </Text>
+          </FadeIn>
         ) : null}
       </View>
 
@@ -204,9 +213,9 @@ export default function Explore() {
             {avatars.length} avatar{avatars.length === 1 ? "" : "s"} within {formatDistance(config.geofenceRadiusMeters)}
           </Text>
         </View>
-        <Pressable style={styles.fab} onPress={recenter} accessibilityLabel="Centre on my location">
+        <Tap style={styles.fab} onPress={recenter} accessibilityLabel="Centre on my location">
           <Ionicons name="locate" size={22} color={colors.navy} />
-        </Pressable>
+        </Tap>
       </View>
     </View>
   );

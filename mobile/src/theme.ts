@@ -1,7 +1,6 @@
 /** Design tokens sampled from the CitySense mockup (UI.jpeg) and its asset files. */
 export const colors = {
   primary: "#9A2143",
-  primaryPressed: "#7D1A36",
   navy: "#1D2B4F",
   text: "#1F1F24",
   textMuted: "#6B6B76",

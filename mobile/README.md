@@ -60,10 +60,26 @@ The release APK is signed with the debug keystore — fine for sideloading, not 
 
 ## Develop
 
+First run after cloning (Node 20+, JDK 17+, Android SDK as above, an emulator or USB device):
+
 ```bash
-npm run typecheck
+git clone https://github.com/Adityakeerti/CitySense.git && cd CitySense
+cd mobile
+cp .env.example .env          # point EXPO_PUBLIC_API_BASE_URL at your core (see "Build the APK")
+npm ci                        # exact versions from package-lock.json
 npx expo run:android          # dev build on an emulator/device (MapLibre needs native code; Expo Go won't work)
 ```
+
+`expo run:android` generates `android/`, builds the native app, installs it and starts the Metro dev
+server; later runs reuse the native build and are much faster. Checks before pushing:
+
+```bash
+npm run typecheck             # TypeScript
+npm test                      # motion token / policy tests
+```
+
+Animation follows the shared motion standard in [`docs/motion.md`](../docs/motion.md); use the tokens and
+components in `src/motion/` (timings, `Tap`, `FadeIn`, reduce-motion) rather than ad-hoc durations.
 
 ## Known gaps
 

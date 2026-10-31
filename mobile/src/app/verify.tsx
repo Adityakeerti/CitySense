@@ -8,6 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { AuthHeader } from "../components/AuthHeader";
 import { Button } from "../components/Button";
 import { OtpInput } from "../components/OtpInput";
+import { LinkText } from "../components/LinkText";
 import { ErrorBanner } from "../components/StateViews";
 import { VerifyArt } from "../components/VerifyArt";
 import { mmss, useCountdown } from "../hooks/useCountdown";
@@ -71,17 +72,16 @@ export default function Verify() {
         <OtpInput length={length} value={code} onChange={setCode} />
         {error ? <ErrorBanner message={error} /> : null}
         <Button title="Verify" onPress={submit} loading={busy} style={{ marginTop: 28 }} />
-        <Text
+        <LinkText
           style={[styles.resend, left > 0 && styles.resendDisabled]}
+          containerStyle={styles.centered}
           onPress={left > 0 ? undefined : send}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: left > 0 }}
         >
           Resend OTP {left > 0 ? <Text style={styles.timer}>({mmss(left)})</Text> : null}
-        </Text>
-        <Text style={styles.switch} onPress={() => void signOut().then(() => router.replace("/welcome"))}>
+        </LinkText>
+        <LinkText style={styles.switch} containerStyle={styles.centered} onPress={() => void signOut().then(() => router.replace("/welcome"))}>
           Use a different account
-        </Text>
+        </LinkText>
       </ScrollView>
     </SafeAreaView>
   );
@@ -96,4 +96,5 @@ const styles = StyleSheet.create({
   resendDisabled: { color: colors.textMuted },
   timer: { fontFamily: fonts.regular, color: colors.textMuted },
   switch: { textAlign: "center", fontFamily: fonts.regular, color: colors.primary, marginTop: 8 },
+  centered: { alignSelf: "center" },
 });

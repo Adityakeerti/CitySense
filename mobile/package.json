@@ -39,6 +39,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
+    "test": "node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/motion/tokens.test.mjs",
     "build:apk": "node scripts/build-apk.js"
   },
   "private": true

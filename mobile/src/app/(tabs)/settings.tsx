@@ -1,12 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Animated, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../../auth/AuthContext";
 import { Card } from "../../components/Card";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { config } from "../../config";
 import { images } from "../../content/onboarding";
+import { duration, timing, useReducedMotion } from "../../motion";
+import { Tap } from "../../motion/Tap";
 import { colors, fonts, radius } from "../../theme";
 
 /** Chat reply languages the core agent supports. */
@@ -56,19 +59,7 @@ export default function Settings() {
         </Card>
 
         <Text style={styles.section}>Chat language</Text>
-        <View style={styles.segment}>
-          {LANGUAGES.map((l) => (
-            <Pressable
-              key={l.code}
-              style={[styles.segBtn, language === l.code && styles.segActive]}
-              onPress={() => setLanguage(l.code)}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: language === l.code }}
-            >
-              <Text style={[styles.segText, language === l.code && styles.segTextActive]}>{l.label}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <Segmented options={LANGUAGES} value={language} onChange={setLanguage} />
 
         <Text style={styles.section}>About</Text>
         <Card style={{ padding: 0 }}>
@@ -76,11 +67,52 @@ export default function Settings() {
           <Row icon="map-outline" label="Map data" value="© OpenStreetMap contributors" />
         </Card>
 
-        <Pressable style={styles.logout} onPress={logout} accessibilityRole="button">
+        <Tap style={styles.logout} onPress={logout} accessibilityLabel="Log out">
           <Ionicons name="log-out-outline" size={20} color={colors.danger} />
           <Text style={styles.logoutText}>Log out</Text>
-        </Pressable>
+        </Tap>
       </ScrollView>
+    </View>
+  );
+}
+
+/** Two-way switch whose thumb slides to the chosen option, like a native segmented control. */
+function Segmented({ options, value, onChange }: { options: { code: string; label: string }[]; value: string; onChange: (code: string) => void }) {
+  const reduced = useReducedMotion();
+  const [width, setWidth] = useState(0);
+  const x = useRef(new Animated.Value(0)).current;
+  const placed = useRef(false);
+  const segW = width > 0 ? (width - SEG_PAD * 2) / options.length : 0;
+  const index = Math.max(0, options.findIndex((o) => o.code === value));
+
+  useEffect(() => {
+    if (!segW) return;
+    const to = index * segW;
+    // First placement (and reduce motion) snaps; later changes slide.
+    if (!placed.current || reduced) {
+      x.setValue(to);
+      placed.current = true;
+    } else {
+      timing(x, to, { duration: duration.fast, curve: "move" }).start();
+    }
+  }, [index, segW, reduced, x]);
+
+  return (
+    <View style={styles.segment} onLayout={(e) => setWidth(e.nativeEvent.layout.width)} accessibilityRole="radiogroup">
+      {segW > 0 ? <Animated.View style={[styles.segThumb, { width: segW, transform: [{ translateX: x }] }]} /> : null}
+      {options.map((o) => (
+        <Tap
+          key={o.code}
+          feedback="dim"
+          style={styles.segBtn}
+          onPress={() => onChange(o.code)}
+          accessibilityRole="radio"
+          accessibilityState={{ selected: value === o.code }}
+          accessibilityLabel={o.label}
+        >
+          <Text style={[styles.segText, value === o.code && styles.segTextActive]}>{o.label}</Text>
+        </Tap>
+      ))}
     </View>
   );
 }
@@ -97,6 +129,8 @@ function Row({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; lab
   );
 }
 
+const SEG_PAD = 4;
+
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: colors.surface },
   content: { paddingHorizontal: 20, paddingBottom: 40, gap: 12 },
@@ -108,9 +142,20 @@ const styles = StyleSheet.create({
   badge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.surfaceAlt, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   badgeText: { fontFamily: fonts.semibold, fontSize: 11, color: colors.textMuted },
   section: { fontFamily: fonts.bold, fontSize: 15, color: colors.text, marginTop: 8 },
-  segment: { flexDirection: "row", backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: 4 },
+  segment: { flexDirection: "row", backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: SEG_PAD },
   segBtn: { flex: 1, height: 40, alignItems: "center", justifyContent: "center", borderRadius: radius.sm },
-  segActive: { backgroundColor: colors.surface, elevation: 1, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4 },
+  segThumb: {
+    position: "absolute",
+    top: SEG_PAD,
+    left: SEG_PAD,
+    bottom: SEG_PAD,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+  },
   segText: { fontFamily: fonts.medium, color: colors.textMuted },
   segTextActive: { color: colors.primary, fontFamily: fonts.bold },
   row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 14 },

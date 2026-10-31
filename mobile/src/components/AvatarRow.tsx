@@ -1,5 +1,6 @@
 import { Image } from "expo-image";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { Tap } from "../motion/Tap";
 import type { Avatar } from "../api/types";
 import { absoluteUrl } from "../config";
 import { colors, fonts } from "../theme";
@@ -7,7 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 export function AvatarRow({ avatar, onPress, right }: { avatar: Avatar; onPress: () => void; right?: React.ReactNode }) {
   return (
-    <Pressable style={styles.row} onPress={onPress} accessibilityLabel={`${avatar.name}, ${avatar.title}`}>
+    <Tap feedback="highlight" style={styles.row} onPress={onPress} accessibilityLabel={`${avatar.name}, ${avatar.title}`}>
       <View style={styles.imgWrap}>
         <Image source={{ uri: absoluteUrl(avatar.pinImageUrl) }} style={styles.img} contentFit="contain" />
       </View>
@@ -24,7 +25,7 @@ export function AvatarRow({ avatar, onPress, right }: { avatar: Avatar; onPress:
         </View>
       </View>
       {right}
-    </Pressable>
+    </Tap>
   );
 }
 

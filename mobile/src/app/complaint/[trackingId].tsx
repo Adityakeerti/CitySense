@@ -9,6 +9,7 @@ import { AuthHeader } from "../../components/AuthHeader";
 import { Card } from "../../components/Card";
 import { ErrorBanner, Loading } from "../../components/StateViews";
 import { StatusBadge } from "../../components/StatusBadge";
+import { FadeIn } from "../../motion/FadeIn";
 import { colors, fonts } from "../../theme";
 import { timeAgo } from "../../utils/geo";
 
@@ -53,7 +54,7 @@ export default function TrackComplaint() {
         {error ? <ErrorBanner message={error} onRetry={load} /> : null}
         {!complaint && !error ? <Loading /> : null}
         {complaint ? (
-          <>
+          <FadeIn style={styles.loaded}>
             <Card style={{ gap: 6 }}>
               <StatusBadge value={complaint.status} />
               <Text style={styles.title}>{complaint.title}</Text>
@@ -81,7 +82,7 @@ export default function TrackComplaint() {
                 );
               })}
             </View>
-          </>
+          </FadeIn>
         ) : null}
       </ScrollView>
     </SafeAreaView>
@@ -91,6 +92,7 @@ export default function TrackComplaint() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   content: { paddingHorizontal: 24, paddingBottom: 32, gap: 12 },
+  loaded: { gap: 12 },
   title: { fontFamily: fonts.bold, fontSize: 18, color: colors.text },
   body: { fontFamily: fonts.regular, fontSize: 14, color: colors.text },
   meta: { fontFamily: fonts.regular, fontSize: 12, color: colors.textMuted },
