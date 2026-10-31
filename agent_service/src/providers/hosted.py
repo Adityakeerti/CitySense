@@ -113,4 +113,11 @@ def configured_providers() -> dict[str, OpenAICompatibleProvider]:
             settings.sarvam_api_key.get_secret_value(),
             settings.sarvam_model,
         )
+    if settings.gemini_api_key:
+        providers["gemini"] = OpenAICompatibleProvider(
+            "gemini",
+            settings.gemini_base_url,
+            settings.gemini_api_key.get_secret_value(),
+            settings.gemini_model,
+        )
     return providers

@@ -38,6 +38,7 @@ class PendingActionView(BaseModel):
     token: str
     summary: str
     expiresAt: datetime
+    action_type: str = "create_complaint"
 
 
 class AgentResponse(BaseModel):

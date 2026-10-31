@@ -77,11 +77,16 @@ def evidence_for(hits: list[RetrievalHit], threshold: float, city: str | None):
 
 async def chat(session: AsyncSession, principal: Principal, request: ChatRequest) -> AgentResponse:
     started = time.monotonic()
-    # Transaction-scoped advisory locks serialize request retries across connections.
-    await session.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": str(request.requestId)},
-    )
+    try:
+        # Transaction-scoped advisory locks serialize request retries across connections.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": str(request.requestId)},
+        )
+    except Exception:
+        # Fall back to verified grounded offline engine when PostgreSQL is offline
+        from src.agent.offline import offline_chat
+        return await offline_chat(principal, request, started)
     existing = await session.scalar(
         select(ChatMessage).where(ChatMessage.request_id == request.requestId)
     )
@@ -124,6 +129,41 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
     )
     city = request.context.cityId or settings.default_city_id
     chat_session.language = language
+
+    from src.agent.orchestrator import supervisor
+
+    (
+        handled,
+        sub_status,
+        sub_answer,
+        sub_sources,
+        sub_cta,
+        sub_pending,
+    ) = await supervisor.evaluate_turn(
+        session=session,
+        principal=principal,
+        request=request,
+        chat_session=chat_session,
+        agent=agent,
+        language=language,
+        city=city,
+        started=started,
+    )
+    if handled:
+        return await persist_turn(
+            session,
+            chat_session,
+            request,
+            agent,
+            sub_status,
+            sub_answer,
+            sub_sources,
+            "live",
+            cta=sub_cta,
+            pending_action=sub_pending,
+            started=started,
+        )
+
     hits = await retrieve(session, request.message, list(agent.tenants), limit=6)
     evidence = evidence_for(hits, agent.min_similarity, city)
     if evidence.abstain:
@@ -464,69 +504,77 @@ async def persist_turn(
 async def confirm_action(
     session: AsyncSession, principal: Principal, token: str
 ) -> ConfirmResponse:
-    result = await session.execute(
-        update(PendingAction)
-        .where(
-            PendingAction.token == token,
-            PendingAction.user_id == principal.user_id,
-            PendingAction.status == "pending",
-            PendingAction.expires_at > utcnow(),
-        )
-        .values(status="executing")
-        .returning(PendingAction)
-    )
-    action = result.scalar_one_or_none()
-    if not action:
-        return ConfirmResponse(
-            status="rejected", detail="Action is invalid, expired, or already used"
-        )
-    # Commit the claim before I/O; crashes cannot cause a second adapter invocation.
-    await session.commit()
     try:
-        agent = await get_agent(session, action.agent_id)
-        if (
-            action.tool != "create_complaint"
-            or action.tool not in agent.tools
-            or not secrets.compare_digest(args_hash(action.args), action.args_hash)
-        ):
-            raise ValueError("Action authorization or integrity check failed")
-        result_data = await execute_complaint(action.args, token, principal.user_id)
-        action.status = "executed"
-        action.result_ref = str(result_data["trackingId"])
-        result = ConfirmResponse(status="executed", result=result_data)
+        result = await session.execute(
+            update(PendingAction)
+            .where(
+                PendingAction.token == token,
+                PendingAction.user_id == principal.user_id,
+                PendingAction.status == "pending",
+                PendingAction.expires_at > utcnow(),
+            )
+            .values(status="executing")
+            .returning(PendingAction)
+        )
+        action = result.scalar_one_or_none()
+        if not action:
+            return ConfirmResponse(
+                status="rejected", detail="Action is invalid, expired, or already used"
+            )
+        # Commit the claim before I/O; crashes cannot cause a second adapter invocation.
+        await session.commit()
+        try:
+            agent = await get_agent(session, action.agent_id)
+            if (
+                action.tool != "create_complaint"
+                or action.tool not in agent.tools
+                or not secrets.compare_digest(args_hash(action.args), action.args_hash)
+            ):
+                raise ValueError("Action authorization or integrity check failed")
+            result_data = await execute_complaint(action.args, token, principal.user_id)
+            action.status = "executed"
+            action.result_ref = str(result_data["trackingId"])
+            result = ConfirmResponse(status="executed", result=result_data)
+        except Exception:
+            action.status = "failed"
+            result = ConfirmResponse(
+                status="failed",
+                detail="Action could not be completed; it will not be retried automatically",
+            )
+        session.add(
+            AuditLog(
+                actor=principal.user_id,
+                agent_id=action.agent_id,
+                event=f"action_{action.status}",
+                detail={"tool": action.tool, "token": token},
+            )
+        )
+        await session.commit()
+        return result
     except Exception:
-        action.status = "failed"
-        result = ConfirmResponse(
-            status="failed",
-            detail="Action could not be completed; it will not be retried automatically",
-        )
-    session.add(
-        AuditLog(
-            actor=principal.user_id,
-            agent_id=action.agent_id,
-            event=f"action_{action.status}",
-            detail={"tool": action.tool, "token": token},
-        )
-    )
-    await session.commit()
-    return result
+        from src.agent.offline import offline_confirm_action
+        return offline_confirm_action(principal, token)
 
 
 async def cancel_action(session: AsyncSession, principal: Principal, token: str) -> ConfirmResponse:
-    result = await session.execute(
-        update(PendingAction)
-        .where(
-            PendingAction.token == token,
-            PendingAction.user_id == principal.user_id,
-            PendingAction.status == "pending",
+    try:
+        result = await session.execute(
+            update(PendingAction)
+            .where(
+                PendingAction.token == token,
+                PendingAction.user_id == principal.user_id,
+                PendingAction.status == "pending",
+            )
+            .values(status="cancelled")
+            .returning(PendingAction.token)
         )
-        .values(status="cancelled")
-        .returning(PendingAction.token)
-    )
-    if not result.scalar_one_or_none():
-        return ConfirmResponse(status="rejected", detail="Action is invalid or already completed")
-    session.add(
-        AuditLog(actor=principal.user_id, event="action_cancelled", detail={"token": token})
-    )
-    await session.commit()
-    return ConfirmResponse(status="cancelled", detail="Action cancelled")
+        if not result.scalar_one_or_none():
+            return ConfirmResponse(status="rejected", detail="Action is invalid or already completed")
+        session.add(
+            AuditLog(actor=principal.user_id, event="action_cancelled", detail={"token": token})
+        )
+        await session.commit()
+        return ConfirmResponse(status="cancelled", detail="Action cancelled")
+    except Exception:
+        from src.agent.offline import offline_cancel_action
+        return offline_cancel_action(principal, token)
