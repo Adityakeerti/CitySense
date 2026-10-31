@@ -45,6 +45,11 @@ function RootStack() {
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface }, animation: stackAnimation }}>
       <Stack.Screen name="(tabs)" options={{ animation: "fade" }} />
+      {/* Welcome's kite takeoff hands over to Login with a cross-fade; every other way into Login keeps the default. */}
+      <Stack.Screen
+        name="login"
+        options={({ route }) => ((route.params as { via?: string } | undefined)?.via === "kite" ? { animation: "fade" } : {})}
+      />
     </Stack>
   );
 }
