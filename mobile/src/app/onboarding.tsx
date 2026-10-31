@@ -5,6 +5,7 @@ import {
   FlatList,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -23,20 +24,40 @@ export default function Onboarding() {
   const [index, setIndex] = useState(0);
   const { completeOnboarding } = useAuth();
 
+  const finish = async () => {
+    await completeOnboarding();
+    router.replace("/welcome");
+  };
+
   const next = async () => {
-    if (index < slides.length - 1) {
-      list.current?.scrollToIndex({ index: index + 1, animated: true });
+    const nextIndex = index + 1;
+    if (nextIndex < slides.length) {
+      setIndex(nextIndex);
+      try {
+        list.current?.scrollToOffset({ offset: nextIndex * width, animated: true });
+      } catch {
+        list.current?.scrollToIndex({ index: nextIndex, animated: true });
+      }
     } else {
-      await completeOnboarding();
-      router.replace("/welcome");
+      await finish();
     }
   };
 
-  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) =>
-    setIndex(Math.round(e.nativeEvent.contentOffset.x / width));
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const newIdx = Math.round(e.nativeEvent.contentOffset.x / width);
+    if (newIdx !== index && newIdx >= 0 && newIdx < slides.length) {
+      setIndex(newIdx);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <View style={styles.header}>
+        <View style={{ flex: 1 }} />
+        <Pressable onPress={finish} hitSlop={10} style={styles.skipBtn}>
+          <Text style={styles.skipText}>Skip</Text>
+        </Pressable>
+      </View>
       <FlatList
         ref={list}
         data={slides}
@@ -44,7 +65,17 @@ export default function Onboarding() {
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         onMomentumScrollEnd={onScroll}
+        getItemLayout={(_, i) => ({
+          length: width,
+          offset: width * i,
+          index: i,
+        })}
+        onScrollToIndexFailed={(info) => {
+          list.current?.scrollToOffset({ offset: info.index * width, animated: true });
+        }}
         renderItem={({ item }) => <SlideView slide={item} width={width} />}
       />
       <View style={styles.footer}>
@@ -101,7 +132,23 @@ function SlideView({ slide, width }: { slide: Slide; width: number }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  slide: { alignItems: "center", paddingTop: 24 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingHorizontal: 24,
+    paddingTop: 12,
+  },
+  skipBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  skipText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  slide: { alignItems: "center", paddingTop: 12 },
   emblemWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 12 },
   emblemTitle: { fontFamily: fonts.display, fontSize: 26, color: colors.text, marginTop: -8 },
   ghost: { position: "absolute", opacity: 0.35 },

@@ -10,5 +10,13 @@ export function NextArrow({ onPress, label = "Next" }: { onPress: () => void; la
 }
 
 const styles = StyleSheet.create({
-  btn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#111", alignItems: "center", justifyContent: "center" },
+  btn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#111",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer" as any,
+  },
 });

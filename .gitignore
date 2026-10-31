@@ -65,3 +65,6 @@ Thumbs.db
 # Log files
 *.log
 logs/
+
+# Android binaries
+*.apk

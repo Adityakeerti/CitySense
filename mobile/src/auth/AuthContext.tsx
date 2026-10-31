@@ -1,4 +1,4 @@
-import * as SecureStore from "expo-secure-store";
+import { storage } from "../utils/storage";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { setAuthToken, setUnauthorizedHandler } from "../api/client";
 import { authApi } from "../api/endpoints";
@@ -36,10 +36,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       const [token, userJson, onboarded, language] = await Promise.all([
-        SecureStore.getItemAsync(KEYS.token),
-        SecureStore.getItemAsync(KEYS.user),
-        SecureStore.getItemAsync(KEYS.onboarded),
-        SecureStore.getItemAsync(KEYS.language),
+        storage.getItem(KEYS.token),
+        storage.getItem(KEYS.user),
+        storage.getItem(KEYS.onboarded),
+        storage.getItem(KEYS.language),
       ]);
       setAuthToken(token);
       setState({
@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     setAuthToken(null);
-    await Promise.all([SecureStore.deleteItemAsync(KEYS.token), SecureStore.deleteItemAsync(KEYS.user)]);
+    await Promise.all([storage.deleteItem(KEYS.token), storage.deleteItem(KEYS.user)]);
     setState((s) => ({ ...s, token: null, user: null }));
   }, []);
 
@@ -66,26 +66,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (res: TokenResponse) => {
     setAuthToken(res.accessToken);
     await Promise.all([
-      SecureStore.setItemAsync(KEYS.token, res.accessToken),
-      SecureStore.setItemAsync(KEYS.user, JSON.stringify(res.user)),
-      SecureStore.setItemAsync(KEYS.language, res.user.language),
+      storage.setItem(KEYS.token, res.accessToken),
+      storage.setItem(KEYS.user, JSON.stringify(res.user)),
+      storage.setItem(KEYS.language, res.user.language),
     ]);
     setState((s) => ({ ...s, token: res.accessToken, user: res.user, language: res.user.language }));
   }, []);
 
   const completeOnboarding = useCallback(async () => {
-    await SecureStore.setItemAsync(KEYS.onboarded, "1");
+    await storage.setItem(KEYS.onboarded, "1");
     setState((s) => ({ ...s, onboarded: true }));
   }, []);
 
   const setLanguage = useCallback(async (language: string) => {
-    await SecureStore.setItemAsync(KEYS.language, language);
+    await storage.setItem(KEYS.language, language);
     setState((s) => ({ ...s, language }));
   }, []);
 
   const refreshUser = useCallback(async () => {
     const user = await authApi.me();
-    await SecureStore.setItemAsync(KEYS.user, JSON.stringify(user));
+    await storage.setItem(KEYS.user, JSON.stringify(user));
     setState((s) => ({ ...s, user }));
   }, []);
 

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Camera, type CameraRef, GeoJSONSource, Layer, Map, Marker } from "@maplibre/maplibre-react-native";
+import { ExploreMap } from "../../components/ExploreMap";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,7 +19,7 @@ type Result = { kind: "avatar"; avatar: Avatar } | { kind: "place"; place: Place
 
 export default function Explore() {
   const insets = useSafeAreaInsets();
-  const camera = useRef<CameraRef>(null);
+  const camera = useRef<any>(null);
   const { config, error: configError, reload } = useMapConfig();
   const { coords, status: locStatus, refresh: refreshLocation } = useUserLocation();
   const [avatars, setAvatars] = useState<Avatar[]>([]);
@@ -120,50 +120,16 @@ export default function Explore() {
 
   return (
     <View style={styles.fill}>
-      <Map
-        style={styles.fill}
-        mapStyle={absoluteUrl(config.styleUrl)}
-        logo={false}
-        compass={false}
-        attribution
-        attributionPosition={{ bottom: 8, left: 8 }}
-        onDidFinishLoadingMap={() => setMapReady(true)}
-      >
-        <Camera
-          ref={camera}
-          minZoom={config.minZoom}
-          maxZoom={config.maxZoom}
-          initialViewState={{ center: [config.defaultLongitude, config.defaultLatitude], zoom: config.defaultZoom }}
-        />
-        {geofence && (
-          <GeoJSONSource id="geofence" data={geofence}>
-            <Layer id="geofence-fill" type="fill" paint={{ "fill-color": colors.geofenceFill }} />
-            <Layer id="geofence-line" type="line" paint={{ "line-color": colors.geofenceLine, "line-width": 1.5 }} />
-          </GeoJSONSource>
-        )}
-        {avatars.map((a) => (
-          // Presses are hit-tested natively by the map (Marker.onPress); the content stays non-interactive
-          // because RN touchables inside reparented marker views never receive the touch.
-          <Marker key={a.id} id={a.id} lngLat={[a.longitude, a.latitude]} anchor="bottom" onPress={() => openAvatar(a)}>
-            <View pointerEvents="none" accessible accessibilityLabel={`${a.name}, ${a.title}`} style={styles.pinWrap}>
-              <Image source={{ uri: absoluteUrl(a.pinImageUrl) }} style={styles.pinImage} contentFit="contain" />
-              <Ionicons name="location" size={22} color={colors.pinGreen} style={styles.pinIcon} />
-            </View>
-          </Marker>
-        ))}
-        {placePin && (
-          <Marker id="place" lngLat={[placePin.longitude, placePin.latitude]} anchor="bottom">
-            <Ionicons pointerEvents="none" name="location-sharp" size={34} color={colors.primary} />
-          </Marker>
-        )}
-        {coords && (
-          <Marker id="me" lngLat={[coords.longitude, coords.latitude]} anchor="center">
-            <View style={styles.meHalo} pointerEvents="none">
-              <View style={styles.meDot} />
-            </View>
-          </Marker>
-        )}
-      </Map>
+      <ExploreMap
+        config={config}
+        cameraRef={camera}
+        geofence={geofence}
+        avatars={avatars}
+        placePin={placePin}
+        coords={coords}
+        onOpenAvatar={openAvatar}
+        onMapReady={() => setMapReady(true)}
+      />
 
       <View style={[styles.searchWrap, { top: insets.top + 10 }]}>
         <View style={styles.search}>
