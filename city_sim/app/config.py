@@ -27,6 +27,26 @@ class ClusterConfig(Strict):
     offset_m: tuple[float, float] = (0.0, 0.0)
 
 
+class Persona(Strict):
+    text: str
+    weight: float = Field(gt=0)
+
+
+class PopulationConfig(Strict):
+    """Randomised population (see app/population.py)."""
+    generate: bool = True
+    seed: int = 11
+    clusters: int = Field(default=28, ge=1)
+    total_population: int = Field(default=24000, ge=1)
+    size_sigma: float = Field(default=0.9, ge=0)   # lognormal sigma: larger = more uneven neighbourhood sizes
+    min_population: int = 40
+    spread_m: float = 420.0                        # max distance from any road
+    min_road_distance_m: float = 45.0              # never on the carriageway
+    min_spacing_m: float = 110.0
+    names: list[str]
+    personas: list[Persona]
+
+
 class RootCauseConfig(Strict):
     base_url: str
     model: str
@@ -58,7 +78,8 @@ class SimConfig(Strict):
     share_fraction: dict[Share, float]
     car_ratio: dict[Intent, float]
     departure_window_sec: dict[Departure, tuple[float, float]]
-    clusters: list[ClusterConfig]
+    clusters: list[ClusterConfig] = []            # explicit clusters (used when population.generate is false)
+    population: PopulationConfig | None = None
 
     @model_validator(mode="after")
     def complete_tables(self) -> "SimConfig":
@@ -66,6 +87,8 @@ class SimConfig(Strict):
             raise ValueError("share_fraction / car_ratio must cover every enum value")
         if set(self.departure_window_sec) != set(DEPARTURES):
             raise ValueError("departure_window_sec must cover every departure option")
+        if not self.clusters and not (self.population and self.population.generate):
+            raise ValueError("configure either clusters or population.generate")
         if len({c.id for c in self.clusters}) != len(self.clusters):
             raise ValueError("cluster ids must be unique")
         return self

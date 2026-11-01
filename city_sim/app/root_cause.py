@@ -64,18 +64,26 @@ SIMULATED digital twin of an urban arterial (cell transmission model). You expla
 
 How the evidence was produced:
 1. Jam cluster: DBSCAN over noisy loop-sensor speeds below the congestion threshold.
-2. Origin: shockwave back-tracing; the origin is the downstream-most cell of the jam's discharge front. It is usually
-   within +-1 cell of the true bottleneck.
+2. Origin: shockwave back-tracing gives the jam's downstream-most discharge front (origin.traced_front_cell). When
+   queues from two bottlenecks merge, that front can be the wrong one, so several candidates (traced front, internal
+   discharge fronts, junction stop lines in the jam) each get a capacity-restore replay (origin.candidates); the
+   candidate that removes clearly the most delay becomes origin.cell. Usually within +-1 cell of the bottleneck.
 3. Capacity at origin: effective vs nominal capacity (capacity_ratio), with change points; a significant drop means a
    physical restriction (lane blockage, incident, works) rather than only too many vehicles.
 4. Counterfactual ladder: the twin is replayed from a snapshot taken before the jam, with the real signal controllers
    running, under interventions: restore_capacity (clear restrictions around the origin), demand_peak_shift (retime the
-   background demand peak), rl_signal_control (best alternative signal policy, incl. the reinforcement-learning DQN).
+   background demand peak, or thin a detected trip surge at an entry; counterfactual.demand_alternatives shows both),
+   rl_signal_control (best alternative signal policy, incl. the reinforcement-learning DQN).
    Recovery is vehicle-hours of congestion removed, with a 95% CI over demand-perturbation replicates. Rungs are
    interventions of different size: a larger recovery means more relief, not automatically more blame.
 5. A deterministic ranking (by recovery) produced the situation's hypotheses.
 6. rl_evidence: what the RL signal controller did at the junctions in and around the jam (arterial green share,
    switches, explore/exploit/shield counts, mean Q-margin, recent decisions).
+
+7. counterfactual.verdict is the ladder's own judgement: "conclusive" (top rung separated and above the minimum
+   effect), "tied" (top two 95% intervals overlap) or "inconclusive" (largest effect below min_effect_vhr).
+   jam.age_sec says how long the twin has confirmed this jam; origin.wave_speed_is_fallback=true means the wave
+   speed is the configured value, not a measurement, so it is not evidence.
 
 Cell ids increase downstream along the arterial. Your job:
 - Identify the most likely root cause of THIS congestion, reasoning step by step from specific evidence fields.
@@ -85,6 +93,9 @@ Cell ids increase downstream along the arterial. Your job:
   Use the signal-alternative recoveries and rl_evidence.
 - Recommend concrete operator actions with an owner.
 - List caveats (simulated data, sensor noise, origin +-1 cell, replay horizon, intervention sizes).
+Calibrate confidence: "high" only if the verdict is "conclusive" AND the physical evidence (capacity drop, origin)
+points the same way; with "tied" use at most "medium" and name the competing causes; with "inconclusive" use "low"
+and say what more data or time would resolve it. 95% intervals cover demand-perturbation noise only.
 Quote numbers exactly as they appear in the evidence. Never introduce numbers that are not in the evidence."""
 
 
@@ -120,8 +131,8 @@ def compact_evidence(d: dict[str, Any], topology: dict[str, Any] | None) -> dict
         "sim_time_sec": d["sim_time"],
         "signal_policy_running": d["policy"],
         "corridor": corridor,
-        "jam": {k: d["jam"][k] for k in ("tail_cell", "head_cell", "cell_count", "start_time_sec", "end_time_sec",
-                                         "extent_m", "duration_sec", "mean_speed_mps")},
+        "jam": {k: d["jam"].get(k) for k in ("tail_cell", "head_cell", "observation_count", "age_sec", "start_time_sec",
+                                             "end_time_sec", "extent_m", "duration_sec", "mean_speed_mps")},
         "origin": {**{k: v for k, v in d["origin"].items() if k != "evidence_trail"},
                    "evidence_trail": [{k: e[k] for k in ("cell_id", "timestamp_sec", "mean_speed_mps", "mean_flow_vps", "is_discharge_origin")}
                                       for e in d["origin"]["evidence_trail"][:8]]},
@@ -132,22 +143,31 @@ def compact_evidence(d: dict[str, Any], topology: dict[str, Any] | None) -> dict
     }
 
 
-NUM = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?%?")
+NUM = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?\s?%?")
+DASHES = str.maketrans({"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-"})
+ALWAYS_OK = {95.0}  # the "95%" confidence level is a method constant, not a data value
 
 
 def ungrounded_numbers(analysis: dict[str, Any], evidence: dict[str, Any]) -> list[str]:
     have: list[float] = []
-    for tok in NUM.findall(json.dumps(evidence, ensure_ascii=False)):
-        have.append(float(tok.rstrip("%")))
-    text = json.dumps({k: v for k, v in analysis.items() if k not in ("cause_type", "confidence", "agrees_with_ranking")}, ensure_ascii=False)
+    for tok in NUM.findall(json.dumps(evidence, ensure_ascii=False).translate(DASHES)):
+        have.append(abs(float(tok.rstrip("% "))))
+    text = json.dumps({k: v for k, v in analysis.items() if k not in ("cause_type", "confidence", "agrees_with_ranking")},
+                      ensure_ascii=False).translate(DASHES)
     bad = []
-    for tok in NUM.findall(text):
+    for raw in NUM.findall(text):
+        tok = raw.replace(" ", "")
         pct = tok.endswith("%")
-        v = float(tok.rstrip("%"))
+        v = abs(float(tok.rstrip("%")))  # sign-insensitive: ranges like "1.08-1.21" split into "1.08" and "-1.21"
+        if v in ALWAYS_OK:
+            continue
         cands = [v, v / 100] if pct else [v]
         if abs(v) <= 10 and float(v).is_integer() and not pct:
             continue  # junction / step / list indices
-        if not any(abs(c - h) <= max(0.051, abs(h) * 0.02) for c in cands for h in have):
+        # rounding-level tolerance: half a unit in the last written digit, or 2% relative
+        decimals = len(tok.rstrip("%").split(".")[1]) if "." in tok else 0
+        unit = 0.5 * 10 ** (-decimals)
+        if not any(abs(c - h) <= max(unit / (100 if (pct and c != v) else 1), abs(h) * 0.02) for c in cands for h in have):
             bad.append(tok)
     return sorted(set(bad))
 

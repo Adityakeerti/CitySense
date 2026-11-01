@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     emergency_service_url: str | None = None  # emergency_routing, e.g. http://emergency-routing:8002
     core_service_url: str | None = None  # Spring Boot core, e.g. http://core:8080
     public_data_apis: bool = False  # opt-in Nominatim geocoding + Open-Meteo air quality
+    # The main agent writes every reply with the LLM (templates are only a fallback when it's unreachable).
+    compose_replies: bool = True
     nominatim_url: str = "https://nominatim.openstreetmap.org"
     geo_user_agent: str = "CitySense-Agent/1.0 (+https://github.com/Adityakeerti/CitySense)"
     cors_origins: list[str] = Field(default_factory=list)

@@ -3,7 +3,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, Computed, DateTime, Index, Text
+from sqlalchemy import Column, Computed, DateTime, Index, LargeBinary, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlmodel import Field, SQLModel
 
@@ -124,6 +124,21 @@ class PendingAction(SQLModel, table=True):
     expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     status: str = Field(default="pending", max_length=20, index=True)
     result_ref: str | None = Field(default=None, max_length=500)
+
+
+class Media(SQLModel, table=True):
+    """A citizen photo (complaint evidence), stored in the database (alembic 0003_media)."""
+
+    __tablename__ = "media"
+    __table_args__ = {"schema": "agent"}
+    media_id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: str = Field(max_length=200, index=True)
+    action_token: str | None = Field(default=None, max_length=200, index=True)
+    content_type: str = Field(max_length=100)
+    filename: str = Field(max_length=200)
+    size_bytes: int
+    data: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False))
 
 
 class AuditLog(SQLModel, table=True):

@@ -142,12 +142,17 @@ public class AgentResponder {
     }
 
     public ResponseEntity<byte[]> forwardAudio(MultipartFile file, String language) {
+        return forwardMultipart("/api/agent/voice", file, "recording.m4a", language);
+    }
+
+    /** Uploads one file (voice clip, complaint photo) to agent_service as multipart field {@code file}. */
+    public ResponseEntity<byte[]> forwardMultipart(String path, MultipartFile file, String defaultName, String language) {
         if (!enabled) {
             return unavailable();
         }
         try {
             MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
-            String name = file.getOriginalFilename() != null ? file.getOriginalFilename() : "recording.m4a";
+            String name = file.getOriginalFilename() != null ? file.getOriginalFilename() : defaultName;
             form.add("file", new ByteArrayResource(file.getBytes()) {
                 @Override
                 public String getFilename() {
@@ -157,7 +162,7 @@ public class AgentResponder {
             if (language != null && !language.isBlank()) {
                 form.add("language", language);
             }
-            byte[] out = client.post().uri("/api/agent/voice").headers(this::copyAuth)
+            byte[] out = client.post().uri(path).headers(this::copyAuth)
                     .contentType(MediaType.MULTIPART_FORM_DATA).body(form)
                     .retrieve().body(byte[].class);
             return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(out);
@@ -165,7 +170,7 @@ public class AgentResponder {
             return ResponseEntity.status(e.getStatusCode()).contentType(MediaType.APPLICATION_JSON)
                     .body(e.getResponseBodyAsByteArray());
         } catch (Exception e) {
-            log.warn("agent_service voice upload failed: {}", e.getMessage());
+            log.warn("agent_service upload to {} failed: {}", path, e.getMessage());
             return unavailable();
         }
     }

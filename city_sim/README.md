@@ -22,6 +22,27 @@ observe ──> decide (Gemma, JSON-schema constrained) ──> validate ──�
   number in the reply that is not in the decision record makes the service return the deterministic
   explanation instead (`grounded: false`). This guards numbers only, not the wording.
 
+## Population (randomised)
+
+`population.generate: true` (default) builds the people clusters from a seed instead of a hand-written list
+(`app/population.py`): 28 neighbourhoods at random points within `spread_m` (420 m) of the twin's real roads, at least
+45 m off the carriageway and 110 m apart; sizes drawn from a lognormal (`size_sigma` 0.9: a few large, many small)
+normalised to `total_population` (24 000); personas drawn from weighted categories; each attached to its nearest
+trip entry. Names are drawn from Dehradun localities (labels only). Set `generate: false` and list `clusters` to
+hand-place them instead.
+
+## Root-cause reasoning (`POST /api/city/root-cause {cell, diagnosis?}`)
+
+Takes the twin's deterministic root-cause trace (`/api/twin/diagnose`) and has **Groq `openai/gpt-oss-120b`**
+(a reasoning model; strict JSON-schema output, `reasoning_effort: medium`) explain it. Chosen because it reasons
+explicitly before answering, follows a strict schema and answers in ~5 s on Groq. Fallbacks: `openai/gpt-oss-20b` →
+local Gemma → the deterministic ranking. The key comes from `GROQ_API_KEY` or `SmartCity/.env` and is never logged.
+
+Guardrails: the planted scenario name, ground truth and the repo's action-template strings are removed from the
+evidence before the call; every number in the answer is checked against the evidence at rounding-level tolerance
+and unmatched ones are returned in `ungrounded_numbers` (shown as a warning in the UI). The ranking stays
+deterministic: the model must say whether it agrees and why.
+
 ## Run
 
 ```bash

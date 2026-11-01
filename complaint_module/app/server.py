@@ -22,6 +22,7 @@ from .models import (
 )
 from pydantic import BaseModel, Field
 from .storage import store, UPLOADS_DIR, BASE_DIR
+from . import pg_store
 from .agents import intake_agent, coordinator_agent
 from .llm_service import llm
 from .notices import router as notices_router
@@ -45,6 +46,34 @@ app.include_router(notices_router)
 
 # Mount uploads directory
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+MAX_PHOTO_BYTES = 10 * 1024 * 1024
+
+
+def _sniff_image(data: bytes):
+    """(content_type, ext) from magic bytes; the client's filename and type are not trusted."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg", "jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png", "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp", "webp"
+    if data[4:12] in (b"ftypheic", b"ftypheix", b"ftypmif1", b"ftyphevc"):
+        return "image/heic", "heic"
+    return None
+
+
+@app.get("/api/photos/{name}")
+@app.get("/photos/{name}", include_in_schema=False)
+def get_photo(name: str):
+    """Complaint evidence stored in Postgres (civic_flow.photos)."""
+    from fastapi.responses import Response
+
+    found = pg_store.get_photo(name) if pg_store.enabled() else None
+    if not found:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    data, ctype = found
+    return Response(content=data, media_type=ctype, headers={"Cache-Control": "private, max-age=86400"})
 
 # Background auto-tick state
 SIMULATION_STATE = {
@@ -183,12 +212,20 @@ async def create_complaint_form(
 
     photo_filename = ""
     if photo and photo.filename:
-        ext = os.path.splitext(photo.filename)[1] or ".jpg"
-        unique_name = f"photo_{uuid.uuid4().hex[:10]}{ext}"
-        target_path = os.path.join(UPLOADS_DIR, unique_name)
-        with open(target_path, "wb") as buffer:
-            shutil.copyfileobj(photo.file, buffer)
-        photo_filename = f"/uploads/{unique_name}"
+        data = await photo.read()
+        kind = _sniff_image(data)
+        if not data or len(data) > MAX_PHOTO_BYTES or not kind:
+            raise HTTPException(status_code=415, detail="Photo must be a JPEG, PNG, WebP or HEIC image up to 10 MB")
+        ctype, ext = kind
+        unique_name = f"photo_{uuid.uuid4().hex[:10]}.{ext}"
+        if pg_store.enabled():
+            # Shared database: the photo survives container rebuilds and is served by /api/photos/{name}.
+            pg_store.save_photo(unique_name, ctype, data)
+            photo_filename = f"/api/photos/{unique_name}"
+        else:
+            with open(os.path.join(UPLOADS_DIR, unique_name), "wb") as buffer:
+                buffer.write(data)
+            photo_filename = f"/uploads/{unique_name}"
     elif sample_photo:
         photo_filename = sample_photo
     else:

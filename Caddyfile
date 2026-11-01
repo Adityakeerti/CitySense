@@ -21,7 +21,7 @@
 	@publicOperator {
 		host {$PUBLIC_HOST:public.invalid}
 		path /agent /agent/* /api/emergency/* /api/complaint-flow/*
-		not path /api/complaint-flow/api/meta /api/complaint-flow/api/notices /api/complaint-flow/api/notices/* /api/complaint-flow/api/complaints /api/complaint-flow/api/complaints/*
+		not path /api/complaint-flow/api/meta /api/complaint-flow/api/notices /api/complaint-flow/api/notices/* /api/complaint-flow/api/complaints /api/complaint-flow/api/complaints/* /api/complaint-flow/api/photos/*
 	}
 	# Notice publish/revoke from the Vercel portal arrives here; complaint-module checks the key's value.
 	@publicNoticeWrite {

@@ -42,6 +42,8 @@ class PendingActionView(BaseModel):
     summary: str
     expiresAt: datetime
     action_type: str = "create_complaint"
+    # The issue is one where a photo helps the field crew (sewage, garbage, potholes, encroachment…).
+    photoSuggested: bool = False
 
 
 class PlanStepView(BaseModel):
@@ -85,6 +87,8 @@ class AgentResponse(BaseModel):
     toolCalls: list[ToolCallView] | None = None
     # Structured cards for the client (e.g. emergency mission tracking, resolved location).
     actionData: dict[str, Any] | None = None
+    # Instructions for the citizen app from the main agent (navigate, focus_map, set_preference).
+    clientActions: list[dict[str, Any]] | None = None
 
 
 class SessionCreate(BaseModel):

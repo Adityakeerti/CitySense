@@ -107,7 +107,10 @@ public class CivicDtos {
             double longitude,
             Instant startsAt,
             Instant endsAt,
-            Instant createdAt
+            Instant createdAt,
+            String venue,
+            String organizer,
+            String sourceUrl
     ) {
         public static CityEventResponse from(CityEvent e) {
             return new CityEventResponse(
@@ -120,7 +123,10 @@ public class CivicDtos {
                     e.getLongitude(),
                     e.getStartsAt(),
                     e.getEndsAt(),
-                    e.getCreatedAt()
+                    e.getCreatedAt(),
+                    e.getVenue(),
+                    e.getOrganizer(),
+                    e.getSourceUrl()
             );
         }
     }

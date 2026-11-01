@@ -110,3 +110,21 @@ def test_sample_sections_never_reach_the_llm():
                "### 📅 Upcoming Civic & Community Events (sample data)\n- fake mela\n📊 2 alerts | 3 events"
     text, dropped = local_agent._without_sample_sections(briefing)
     assert dropped and "clear" in text and "fake" not in text and "📊" not in text
+
+
+@pytest.mark.parametrize("title,expected", [
+    ("Traffic warden, Kargi Chowk", "Kargi Chowk"),
+    ("Graphic Era & Bell Road student guide", "Graphic Era & Bell Road"),
+    ("Mindrolling Monastery & Clement Town heritage guide", "Mindrolling Monastery & Clement Town"),
+    ("ISBT transit help desk", "ISBT"),
+    ("Paltan Bazaar shopping guide", "Paltan Bazaar"),
+    ("Ward grievance desk, Mohabbewala", "Mohabbewala"),
+])
+def test_place_hint_from_avatar_title(title, expected):
+    assert local_agent.place_hint(title) == expected
+
+
+def test_gazetteer_knows_the_new_agent_spots():
+    from src.agent.integrations import gazetteer_nearest
+    assert gazetteer_nearest(30.26802, 77.99612)[0] == "graphic era"
+    assert gazetteer_nearest(30.28837, 78.02394)[0] == "kargi chowk"

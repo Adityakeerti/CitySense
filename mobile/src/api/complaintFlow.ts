@@ -43,6 +43,8 @@ export function toComplaint(c: FlowComplaint, statuses: string[]): Complaint {
     resolvedAt: c.resolution_time ?? undefined,
     createdAt: c.created_at,
     updatedAt: c.updated_at,
+    // Placeholder art (sample_*.svg) is not the citizen's evidence.
+    photoUrl: c.photo_url && !/sample_/.test(c.photo_url) ? c.photo_url : undefined,
   };
 }
 

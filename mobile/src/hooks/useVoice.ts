@@ -7,7 +7,7 @@ import {
   useAudioRecorder,
 } from "expo-audio";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Platform } from "react-native";
+import { Animated, Platform } from "react-native";
 import { errorMessage } from "../api/client";
 import { agentApi } from "../api/endpoints";
 import { absoluteUrl } from "../config";
@@ -24,7 +24,10 @@ export type VoiceState = "idle" | "recording" | "transcribing";
  *  - reply playback via /api/agent/tts/clips (Sarvam bulbul:v3) unless the speaker is muted
  */
 export function useVoice(language: string) {
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  // Metering on: the UI draws waves that follow the citizen's voice level.
+  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
+  /** 0..1 live input level while recording (drives the wave animation). */
+  const level = useRef(new Animated.Value(0)).current;
   const [state, setState] = useState<VoiceState>("idle");
   const [autoPlay, setAutoPlay] = useState(true);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -61,6 +64,16 @@ export function useVoice(language: string) {
     });
   }, [stopSpeaking]);
 
+  /** Set (not toggle) the speaker preference, e.g. when the main agent is asked to mute. */
+  const setAutoPlayPref = useCallback(
+    (next: boolean) => {
+      setAutoPlay(next);
+      void storage.setItem(AUTO_PLAY_KEY, next ? "1" : "0");
+      if (!next) stopSpeaking();
+    },
+    [stopSpeaking],
+  );
+
   /** Speak one message. Throws only for unexpected errors; TTS outages degrade to text silently. */
   const speak = useCallback(
     async (id: string, text: string) => {
@@ -95,6 +108,20 @@ export function useVoice(language: string) {
     setState("recording");
     return null;
   }, [recorder, stopSpeaking]);
+
+  // Poll the recorder's level (dBFS, about -60..0) and ease the shared Animated value towards it.
+  useEffect(() => {
+    if (state !== "recording") {
+      Animated.timing(level, { toValue: 0, duration: 250, useNativeDriver: true }).start();
+      return;
+    }
+    const id = setInterval(() => {
+      const db = recorder.getStatus().metering;
+      const v = typeof db === "number" ? Math.max(0, Math.min(1, (db + 55) / 50)) : 0.5;
+      Animated.timing(level, { toValue: v, duration: 110, useNativeDriver: true }).start();
+    }, 110);
+    return () => clearInterval(id);
+  }, [state, recorder, level]);
 
   /** Stops recording and returns the transcript (or throws with a user-facing message). */
   const stopAndTranscribe = useCallback(async (): Promise<string> => {
@@ -132,5 +159,5 @@ export function useVoice(language: string) {
     setState("idle");
   }, [recorder, state]);
 
-  return { state, autoPlay, toggleAutoPlay, speak, stopSpeaking, speakingId, startRecording, stopAndTranscribe, cancelRecording };
+  return { state, level, autoPlay, toggleAutoPlay, setAutoPlayPref, speak, stopSpeaking, speakingId, startRecording, stopAndTranscribe, cancelRecording };
 }

@@ -11,7 +11,7 @@ from app.agents import build_graph, clock, fallback_plan, make_trips, Plan
 from app.config import ClusterConfig, load_config
 
 CFG = load_config(Path(__file__).resolve().parent.parent / "config.yaml")
-CLUSTER = CFG.clusters[0]
+CLUSTER = ClusterConfig(id="t1", name="Test office workers", persona="office workers", population=900, source_id=0)
 
 
 def obs(jammed=(), speed=90):

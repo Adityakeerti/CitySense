@@ -18,6 +18,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 
+from . import pg_store
 from .storage import STATE_DIR
 
 NOTICES_FILE = os.path.join(STATE_DIR, "notices.json")
@@ -80,6 +81,8 @@ def _parse(ts: str) -> datetime.datetime:
 
 
 def _load() -> List[Notice]:
+    if pg_store.enabled():
+        return [Notice(**n) for n in pg_store.list_notices()]
     if not os.path.exists(NOTICES_FILE):
         return []
     try:
@@ -91,6 +94,9 @@ def _load() -> List[Notice]:
 
 
 def _save(notices: List[Notice]) -> None:
+    if pg_store.enabled():
+        pg_store.replace_notices([n.model_dump() for n in notices])
+        return
     with _LOCK:
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(NOTICES_FILE), suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:

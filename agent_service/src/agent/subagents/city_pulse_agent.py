@@ -20,6 +20,8 @@ INTENTS = {
     "water": re.compile(r"water supply|supply schedule|tap water|jal sansthan|पानी की आपूर्ति|पानी", re.I),
     "events": re.compile(r"event|festival|mela|town hall|कार्यक्रम|मेला", re.I),
     "alerts": re.compile(r"alert|advisor|warning|closure|अलर्ट|चेतावनी", re.I),
+    "notices": re.compile(r"notice|announcement|circular|सूचना|नोटिस", re.I),
+    "incidents": re.compile(r"incident|घटना", re.I),
 }
 
 
@@ -46,10 +48,14 @@ class CityPulseSpecialist(BaseSubAgent):
 
         # Step 1: fetch_city_data — only the feeds this question needs, in parallel
         execution_steps.append("fetch_city_data")
-        wanted = {name for name, rx in INTENTS.items() if rx.search(message)}
-        specific = wanted & {"traffic", "weather", "aqi", "water"}
-        if not specific:
-            wanted |= {"alerts", "events"}  # general "what's happening" briefing
+        if kwargs.get("feeds"):
+            # The main agent asked for exact feeds (app control: "show notices", "upcoming events").
+            wanted = set(kwargs["feeds"]) & set(INTENTS)
+        else:
+            wanted = {name for name, rx in INTENTS.items() if rx.search(message)}
+            specific = wanted & {"traffic", "weather", "aqi", "water", "notices", "incidents"}
+            if not specific:
+                wanted |= {"alerts", "events"}  # general "what's happening" briefing
         area = _area(message, kwargs)
         query_str = (kwargs.get("query") or message)[:500]
         calls = {
@@ -59,6 +65,8 @@ class CityPulseSpecialist(BaseSubAgent):
             "weather": ("fetch_weather_inundation", {"area": area}),
             "aqi": ("get_air_quality_index", {"area": area}),
             "water": ("check_water_supply_schedule", {"area": area}),
+            "notices": ("get_govt_notices", {"limit": 5}),
+            "incidents": ("get_city_incidents", {"limit": 5}),
         }
         keys = [k for k in calls if k in wanted]
         results = await asyncio.gather(
@@ -126,7 +134,7 @@ class CityPulseSpecialist(BaseSubAgent):
             else:
                 lines.append("- वर्तमान में कोई आगामी कार्यक्रम सूचीबद्ध नहीं है।")
             lines.append("")
-        if language == "hi":
+        if wanted & {"alerts", "events"} and language == "hi":
             lines.append(f"📊 **सिटी पल्स स्थिति:** {len(alerts)} सक्रिय अलर्ट | {len(events)} आगामी नागरिक कार्यक्रम")
 
         if language != "hi":
@@ -167,7 +175,7 @@ class CityPulseSpecialist(BaseSubAgent):
             else:
                 lines.append("- No public events scheduled for this window.")
             lines.append("")
-        if language != "hi":
+        if wanted & {"alerts", "events"} and language != "hi":
             lines.append(f"📊 **Live Digest Status:** {len(alerts)} active alerts | {len(events)} upcoming civic events")
 
         if any(isinstance(f, dict) and f.get("simulated") for f in feeds.values()):
@@ -224,6 +232,28 @@ class CityPulseSpecialist(BaseSubAgent):
                 + (f" — {a['advice']}" if a.get("advice") else ""),
                 "",
             ]
+        no = feeds.get("notices")
+        if no is not None:
+            rows = [n for n in (no.get("items") or []) if isinstance(n, dict)]
+            out.append("### 📜 " + ("सरकारी सूचनाएँ" if hi else "Government Notices"))
+            for n in rows[:5]:
+                title = (n.get("hindiTitle") if hi and n.get("hindiTitle") else n.get("title")) or "Notice"
+                out.append(f"- **{title}** — {n.get('department', '')} ({n.get('referenceNumber', '')})")
+                if n.get("summary"):
+                    out.append(f"  {str(n['summary'])[:180]}")
+            if not rows:
+                out.append("- " + ("अभी कोई सूचना प्रकाशित नहीं है।" if hi else "No notices published right now."))
+            out.append("")
+        inc = feeds.get("incidents")
+        if inc is not None:
+            rows = [i for i in (inc.get("items") or []) if isinstance(i, dict)]
+            out.append("### 🚨 " + ("हाल की घटनाएँ" if hi else "Recent Incidents"))
+            for i in rows[:5]:
+                out.append(f"- **{i.get('type') or i.get('category') or 'Incident'}** · {i.get('status', '')} · "
+                           f"{i.get('title') or i.get('description') or ''}"[:200])
+            if not rows:
+                out.append("- " + ("कोई हाल की घटना नहीं।" if hi else "No recent incidents."))
+            out.append("")
         wa = feeds.get("water")
         if wa:
             out.append("### 🚰 " + ("जल आपूर्ति" if hi else "Water Supply"))

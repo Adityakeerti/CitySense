@@ -239,3 +239,4 @@ Production deployment, public routes, the end-to-end voice → plan → action f
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 For complete technical specifications, API contracts, entity schemas, and day-by-day schedules, refer to [plan.md](plan.md).
+# dump2

@@ -30,6 +30,10 @@ from src.agent.guardrails import (
     refuse_out_of_scope,
     respond_civic_greeting,
 )
+import re
+
+from src.agent import app_control
+from src.agent.composer import compose
 from src.agent.planner import ExecutionPlan, PlanStep, planner
 from src.agent.schemas import ChatRequest, PendingActionView, PlanStepView, ToolCallView
 from src.agent.subagents import (
@@ -50,6 +54,20 @@ COMPLAINT_CONTEXT_WORDS = ("complaint", "ticket", "grievance", "शिकाय�
 COMPLAINT_FOLLOWUP_WORDS = (
     "active", "all", "show", "list", "check", "open", "pending", "status", "which are", "सक्रिय", "दिखाओ",
 )
+# Questions about City Sense itself or this conversation: answered by the LLM from history + catalog.
+CAPABILITY_RE = re.compile(
+    r"\bwhat\s+(?:all\s+)?(?:things\s+)?(?:can|could)\s+you\s+do\b|\bwhat\s+(?:all\s+)?(?:things\s+)?you\s+(?:can|could)\s+do\b|\\b(?:things|stuff)\\s+you\\s+(?:can|could)\\s+do\\b|\bwhat\s+(?:all\s+)?(?:things\s+)?(?:are\s+)?you\s+"
+    r"(?:able|capable)\b|\bhow\s+can\s+you\s+help\b|\bwhat\s+do\s+you\s+do\b|\byour\s+(?:features|abilities|capabilities)\b"
+    r"|तुम\s+क्या\s+(?:कर|कर\s+सकते)|आप\s+क्या\s+(?:कर|कर\s+सकते)|क्या\s+मदद",
+    re.I,
+)
+CONVERSATION_RE = re.compile(
+    r"\bwhat\s+did\s+(?:i|you)\s+(?:just\s+)?(?:ask|say|tell|mean)\b|\b(?:repeat|summari[sz]e)\s+(?:that|it|our|this|the\s+conversation)\b"
+    r"|\bwho\s+are\s+you\b|\bwhat(?:'s|\s+is)\s+your\s+name\b|\bare\s+you\s+(?:a\s+)?(?:bot|human|ai|real)\b"
+    r"|\b(?:thank\s*(?:s|\s+you)|ok(?:ay)?|cool|great|got\s+it)\b[\s!.]*$|मैंने\s+क्या\s+पूछा|तुम\s+कौन|आप\s+कौन|धन्यवाद",
+    re.I,
+)
+
 STATUS_PRIORITY = ["ACTION_PENDING", "CLARIFICATION_REQUIRED", "HANDOFF_REQUIRED", "ANSWERED", "ABSTAINED", "UNAVAILABLE"]
 
 
@@ -64,10 +82,12 @@ class TurnOutcome:
     plan: list[PlanStepView] | None = None
     tool_calls: list[ToolCallView] | None = None
     action_data: dict[str, Any] | None = None
+    client_actions: list[dict[str, Any]] | None = None
 
 
-def _refusal(result: PoliteRefusalResult, default_cta: str) -> TurnOutcome:
-    return TurnOutcome(True, "ANSWERED", result.message, [], result.suggested_cta or default_cta)
+def _refusal(result: PoliteRefusalResult, default_cta: str, composed: str | None = None) -> TurnOutcome:
+    """Reply text from the LLM when available; the template is only the offline fallback."""
+    return TurnOutcome(True, "ANSWERED", composed or result.message, [], result.suggested_cta or default_cta)
 
 
 def _plan_view(plan: ExecutionPlan) -> list[PlanStepView]:
@@ -87,7 +107,10 @@ def _trace_view(trace: ToolTrace) -> list[ToolCallView]:
 def _is_complaint_followup(message: str, history: list[dict[str, Any]] | None) -> bool:
     if not history:
         return False
-    recent = " ".join(m.get("content", "") for m in history[-2:] if isinstance(m, dict) and m.get("content"))
+    # Only the citizen's own recent words count: the agent's replies mention complaints all the time.
+    recent = " ".join(
+        m.get("content", "") for m in history[-4:] if isinstance(m, dict) and m.get("role") == "user" and m.get("content")
+    )
     recent = recent.lower()
     return any(w in recent for w in COMPLAINT_CONTEXT_WORDS) and any(
         w in message.lower() for w in COMPLAINT_FOLLOWUP_WORDS
@@ -146,19 +169,25 @@ class SupervisorOrchestrator:
             meta["guard"] = {"safe": guard.is_safe, "risk": round(guard.risk_score, 2), "reason": guard.reason}
         if not guard.is_safe:
             logger.warning("Unsafe input from %s: reason=%s risk=%.2f", principal.user_id, guard.reason, guard.risk_score)
-            return _refusal(refuse_injection(language=language), "explore_schemes")
+            # The unsafe text itself is never sent to the model.
+            composed = await compose(intent="unsafe_request", message=None, language=language, history=history)
+            return _refusal(refuse_injection(language=language), "explore_schemes", composed)
 
         # 2. Scope + polite refusals
         scope = classify_scope(request.message, language=language)
         if meta is not None:
             meta["scope"] = scope.scope.value
         if scope.scope == QueryScope.CIVIC_GREETING:
-            return _refusal(respond_civic_greeting(language=language), "report_issue")
+            composed = await compose(intent="greeting", message=request.message, language=language, history=history)
+            return _refusal(respond_civic_greeting(language=language), "report_issue", composed)
         if scope.scope == QueryScope.OUT_OF_SCOPE and scope.detected_topic and scope.detected_topic not in (
             "non-civic general inquiry",
             "empty_query",
         ):
-            return _refusal(refuse_out_of_scope(topic=scope.detected_topic, language=language), "explore_schemes")
+            composed = await compose(intent=f"off_topic:{scope.detected_topic}", message=request.message,
+                                     language=language, history=history)
+            return _refusal(refuse_out_of_scope(topic=scope.detected_topic, language=language), "explore_schemes",
+                            composed)
 
         # 3. Plan
         ctx = request.context
@@ -172,12 +201,41 @@ class SupervisorOrchestrator:
             location=location,
             has_coordinates=has_coords,
         )
+        intents = app_control.parse(request.message)
+        kinds = app_control.data_kinds(intents)
+        if intents:
+            # Data the app shows is still answered by its owning desk; the main agent adds navigation.
+            if "complaints" in kinds and not plan.for_executor(COMPLAINT):
+                plan.add(COMPLAINT, "List your complaints", ["list_user_complaints"])
+            if "businesses" in kinds and not plan.for_executor(KNOWLEDGE):
+                plan.add(KNOWLEDGE, "Recommend local businesses", ["find_local_businesses"])
+            if kinds & {"notices", "events", "incidents"} and not plan.for_executor(PULSE):
+                plan.add(PULSE, "Fetch " + ", ".join(sorted(kinds & {"notices", "events", "incidents"})),
+                         ["get_govt_notices", "get_events", "get_city_incidents"])
+            ui = [i for i in intents if i.kind != "data"]
+            if ui:
+                tools = sorted({{"navigate": "navigate_app", "focus_map": "focus_map", "find_agent": "find_local_agent",
+                                 "preference": "set_app_preference"}[i.kind] for i in ui})
+                plan.steps.insert(0, PlanStep(id=0, executor=MAIN, action="Control the app", tools=tools))
+            for i, st in enumerate(plan.steps, 1):
+                st.id = i
         if agent.agent_id == "municipal":
             # The municipal persona files complaints through its LLM tool loop in service.py.
             plan.steps = [s for s in plan.steps if s.executor != COMPLAINT]
 
         domain_steps = [s for s in plan.steps if s.executor not in (MAIN, KNOWLEDGE)]
-        if not domain_steps:
+        app_step = any(s.action == "Control the app" for s in plan.steps)
+        if not domain_steps and not app_step:
+            # About City Sense itself or this conversation: the main agent answers from history + catalog
+            # instead of searching documents (which would abstain).
+            meta = "capabilities" if CAPABILITY_RE.search(request.message) else (
+                "conversation" if CONVERSATION_RE.search(request.message) else None)
+            if meta:
+                composed = await compose(intent=meta, message=request.message, language=language, history=history)
+                if composed:
+                    step = PlanStepView(id=1, executor=MAIN, action="Answer from conversation and capabilities",
+                                        tools=["llm"], status="completed")
+                    return TurnOutcome(True, "ANSWERED", composed, [], None, None, [step])
             return TurnOutcome(handled=False, plan=_plan_view(plan) if plan.steps else None)
 
         # 4. Execute
@@ -186,13 +244,30 @@ class SupervisorOrchestrator:
         if has_coords:
             resolved.update(latitude=ctx.latitude, longitude=ctx.longitude)
         results: list[tuple[PlanStep, SubAgentResult]] = []
+        client_actions: list[dict[str, Any]] = []
+        app_lines: list[str] = []
 
         for step in plan.steps:
             step.status = "running"
             try:
+                if step.executor == MAIN and step.action == "Control the app":
+                    step.detail = await self._run_app_step(intents, principal, resolved, language, trace,
+                                                           client_actions, app_lines)
+                    step.status = "completed"
+                    continue
                 if step.executor == MAIN:
                     step.detail = await self._run_main_step(step, request, principal, resolved, trace)
                     step.status = "completed"
+                    continue
+                if step.executor == KNOWLEDGE and step.action == "Recommend local businesses":
+                    result = await self.knowledge_agent.recommend_businesses(
+                        request.message, principal, language, trace,
+                        latitude=resolved.get("latitude"), longitude=resolved.get("longitude"),
+                        area=resolved.get("location"),
+                    )
+                    results.append((step, result))
+                    step.status = "completed"
+                    step.detail = f"{len(result.metadata['card']['businesses'])} found"
                     continue
                 if step.executor == KNOWLEDGE:
                     step.status = "skipped"
@@ -210,6 +285,7 @@ class SupervisorOrchestrator:
                     latitude=resolved.get("latitude"),
                     longitude=resolved.get("longitude"),
                     trace=trace,
+                    feeds=sorted(kinds & {"notices", "events", "incidents"}) if step.executor == PULSE else None,
                 )
                 results.append((step, result))
                 step.status = "completed"
@@ -218,9 +294,80 @@ class SupervisorOrchestrator:
                 logger.exception("Plan step %s (%s) failed", step.id, step.executor)
                 step.status = "failed"
 
-        if not results:
+        if not results and not app_lines:
             return TurnOutcome(handled=False, plan=_plan_view(plan), tool_calls=_trace_view(trace))
-        return self._merge(plan, results, trace, resolved, language)
+        if not results:
+            composed = await compose(intent="app_action", message=request.message, language=language,
+                                     history=history, facts=app_lines)
+            return TurnOutcome(True, "ANSWERED", composed or "\n".join(app_lines), [], None, None, _plan_view(plan),
+                               _trace_view(trace), None, client_actions or None)
+        outcome = self._merge(plan, results, trace, resolved, language)
+        template = ("\n".join(app_lines) + "\n\n" if app_lines else "") + outcome.answer
+        # The main agent voices the desks' verified results; their templates are the fallback.
+        desks = ",".join(sorted({st.executor for st, _ in results}))
+        composed = await compose(
+            intent=f"specialist_result:{desks}", message=request.message, language=language, history=history,
+            facts=[*app_lines, *(r.response_text for _, r in results)],
+        )
+        outcome.answer = composed or template
+        outcome.client_actions = client_actions or None
+        return outcome
+
+    async def _run_app_step(
+        self,
+        intents: list,
+        principal: Principal,
+        resolved: dict[str, Any],
+        language: str,
+        trace: ToolTrace,
+        client_actions: list[dict[str, Any]],
+        app_lines: list[str],
+    ) -> str:
+        """Main agent drives the app with its own control tools; the client executes the actions."""
+        hi = language == "hi"
+        names = app_control.SCREEN_NAMES["hi" if hi else "en"]
+        done: list[str] = []
+        for intent in intents:
+            if intent.kind == "data":
+                continue
+            if intent.kind == "navigate":
+                res = await call_tool(MAIN, "navigate_app", intent.params, principal.user_id, trace)
+                if intent.params["screen"] == "complaint":
+                    app_lines.append(f"खोल रहा हूँ: शिकायत #{intent.params['target_id']}" if hi
+                                     else f"Opening complaint #{intent.params['target_id']}.")
+                else:
+                    app_lines.append(f"{names[intent.params['screen']]} खोल रहा हूँ।" if hi
+                                     else f"Opening {names[intent.params['screen']]}.")
+            elif intent.kind == "focus_map":
+                res = await call_tool(MAIN, "focus_map", intent.params, principal.user_id, trace)
+                label = res["client_action"].get("label") or intent.params["query"]
+                app_lines.append(f"नक्शे पर {label} दिखा रहा हूँ।" if hi else f"Showing {label} on the map.")
+                client_actions.append({"type": "navigate", "screen": "explore"})
+            elif intent.kind == "find_agent":
+                res = await call_tool(MAIN, "find_local_agent", intent.params, principal.user_id, trace,
+                                      latitude=resolved.get("latitude"), longitude=resolved.get("longitude"))
+                if res.get("found"):
+                    av = res["avatar"]
+                    app_lines.append(f"{av['name']} ({av.get('title', '')}) से जोड़ रहा हूँ।" if hi
+                                     else f"Connecting you to {av['name']} — {av.get('title', '')}.")
+                else:
+                    app_lines.append(f"मुझे '{intent.params['name']}' नाम का कोई लोकल एजेंट नहीं मिला।" if hi
+                                     else f"I couldn't find a local agent called '{intent.params['name']}'.")
+            elif intent.kind == "preference":
+                res = await call_tool(MAIN, "set_app_preference", intent.params, principal.user_id, trace)
+                if "language" in intent.params:
+                    app_lines.append("अब मैं हिंदी में जवाब दूँगा।" if intent.params["language"] == "hi"
+                                     else "Switched to English.")
+                if "voice_auto_play" in intent.params:
+                    on = intent.params["voice_auto_play"]
+                    app_lines.append(("आवाज़ चालू।" if on else "आवाज़ बंद — मैं केवल लिखकर जवाब दूँगा।") if hi
+                                     else ("Voice replies on." if on else "Voice muted — I'll reply in text only."))
+            else:
+                continue
+            if res.get("client_action"):
+                client_actions.append(res["client_action"])
+            done.append(intent.kind)
+        return ", ".join(done) or "nothing to do"
 
     async def _run_main_step(
         self, step: PlanStep, request: ChatRequest, principal: Principal, resolved: dict[str, Any], trace: ToolTrace
@@ -270,6 +417,7 @@ class SupervisorOrchestrator:
                     summary=r.action["summary"],
                     expiresAt=r.action["expires_at"],
                     action_type=r.action.get("action_type", "create_complaint"),
+                    photoSuggested=bool(r.action.get("photo_suggested")),
                 )
             if st.executor == EMERGENCY and r.action:
                 action_data["emergency"] = r.action

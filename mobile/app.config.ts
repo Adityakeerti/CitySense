@@ -44,6 +44,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
     "@maplibre/maplibre-react-native",
     ["expo-audio", { microphonePermission: "CitySense uses the microphone so you can talk to the city assistant." }],
+    [
+      "expo-image-picker",
+      { cameraPermission: "CitySense uses the camera so you can attach a photo of a civic issue to your complaint.", photosPermission: false },
+    ],
   ],
   experiments: { typedRoutes: false },
 });

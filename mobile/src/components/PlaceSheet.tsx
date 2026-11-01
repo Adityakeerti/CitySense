@@ -5,6 +5,7 @@ import { errorMessage } from "../api/client";
 import { agentApi } from "../api/endpoints";
 import type { AgentReply, PlanStep } from "../api/types";
 import { useVoice } from "../hooks/useVoice";
+import { PendingActionCard } from "./PendingActionCard";
 import { FadeIn } from "../motion/FadeIn";
 import { Tap } from "../motion/Tap";
 import { colors, fonts, radius } from "../theme";
@@ -90,18 +91,6 @@ export function PlaceSheet({ point, language, onClose }: { point: Point; languag
     void ask(q);
   };
 
-  const confirm = async (turn: Turn) => {
-    const token = turn.reply?.pendingAction?.token;
-    if (!token) return;
-    try {
-      const r = await agentApi.confirm(token);
-      const text = r.status === "executed" ? `Filed · ${r.result?.trackingId ?? ""}` : (r.detail ?? r.status);
-      setTurns((t) => t.map((x) => (x.id === turn.id ? { ...x, confirmed: text } : x)));
-    } catch (e) {
-      setTurns((t) => t.map((x) => (x.id === turn.id ? { ...x, confirmed: errorMessage(e) } : x)));
-    }
-  };
-
   const title = label.current ?? turns[0]?.reply?.actionData?.place?.label;
 
   return (
@@ -145,13 +134,15 @@ export function PlaceSheet({ point, language, onClose }: { point: Point; languag
                     accessibilityLabel="Read aloud">
                     <Ionicons name={voice.speakingId === t.id ? "stop-circle-outline" : "play-circle-outline"} size={20} color={colors.accentBlue} />
                   </Tap>
-                  {t.reply.pendingAction && !t.confirmed ? (
-                    <Tap style={styles.confirm} onPress={() => confirm(t)} accessibilityLabel="Confirm and file complaint">
-                      <Text style={styles.confirmText}>Confirm & file</Text>
-                    </Tap>
-                  ) : null}
                   {t.confirmed ? <Text style={styles.muted}>{t.confirmed}</Text> : null}
                 </View>
+                {t.reply.pendingAction && !t.confirmed ? (
+                  <PendingActionCard
+                    pending={t.reply.pendingAction}
+                    onDone={(o) => setTurns((all) => all.map((x) => (x.id === t.id ? { ...x, confirmed: o } : x)))}
+                    compact
+                  />
+                ) : null}
               </>
             ) : null}
           </View>
@@ -223,8 +214,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 10 },
   steps: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6, gap: 1 },
   step: { fontFamily: fonts.regular, fontSize: 11, color: colors.textMuted },
-  confirm: { backgroundColor: colors.success, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 5 },
-  confirmText: { fontFamily: fonts.bold, fontSize: 12, color: "#fff" },
   inputRow: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.surfaceAlt, borderRadius: radius.md,
     paddingHorizontal: 12, height: 44 },
   input: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text },

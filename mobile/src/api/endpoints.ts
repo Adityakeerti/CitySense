@@ -5,7 +5,11 @@ import type {
   AgentReply,
   AudioPreference,
   Avatar,
+  AirQuality,
   AvatarChatResponse,
+  Business,
+  CityWeather,
+  WeatherForecast,
   ConfirmResult,
   ChatIntent,
   CityEvent,
@@ -67,7 +71,26 @@ export const agentApi = {
     request<{ clipId: string; url: string }>("POST", "/api/agent/tts/clips", { body: { text, language }, timeoutMs: 30000 }),
   confirm: (token: string) =>
     request<ConfirmResult>("POST", `/api/agent/actions/${encodeURIComponent(token)}/confirm`, { timeoutMs: 30000 }),
+  /** Attach a camera photo (stored server-side in the database) to a drafted complaint before confirming. */
+  attachPhoto: (token: string, uri: string) => {
+    const form = new FormData();
+    form.append("file", { uri, name: "evidence.jpg", type: "image/jpeg" } as unknown as Blob);
+    return requestForm<{ mediaId: string; contentType: string; sizeBytes: number }>(
+      `/api/agent/actions/${encodeURIComponent(token)}/photo`,
+      form,
+      { timeoutMs: 60000 },
+    );
+  },
   cancel: (token: string) => request<ConfirmResult>("POST", `/api/agent/actions/${encodeURIComponent(token)}/cancel`),
+  /** The main agent (assistant island): full hierarchy, can also drive the app via clientActions. */
+  assistant: (body: {
+    message: string;
+    sessionId?: string;
+    language?: "hi" | "en";
+    latitude?: number;
+    longitude?: number;
+    screen?: string;
+  }) => request<AgentReply>("POST", "/api/agent/assistant", { body, timeoutMs: 60000 }),
   /** Main agent about a tapped map point; pass `question` (+ sessionId) for follow-ups through the full hierarchy. */
   place: (body: {
     latitude: number;
@@ -110,16 +133,18 @@ export const civicApi = {
     return toComplaint(c, meta.statuses);
   },
   /** Department, category and priority are assigned by the module's intake agent. */
-  file: async (body: { title: string; description: string; latitude: number; longitude: number; address?: string }) => {
+  file: async (body: { title: string; description: string; latitude: number; longitude: number; address?: string; photoUri?: string }) => {
     const form = new FormData();
     form.append("title", body.title);
     form.append("description", body.description);
     form.append("lat", String(body.latitude));
     form.append("lng", String(body.longitude));
     if (body.address) form.append("address", body.address);
+    // Evidence photo: the module stores it in Postgres (civic_flow.photos).
+    if (body.photoUri) form.append("photo", { uri: body.photoUri, name: "evidence.jpg", type: "image/jpeg" } as unknown as Blob);
     // Intake runs the guardrail + LLM classification before answering.
     const [c, meta] = await Promise.all([
-      requestForm<FlowComplaint>("/api/complaints", form, { ...flow, timeoutMs: 45000 }),
+      requestForm<FlowComplaint>("/api/complaints", form, { ...flow, timeoutMs: body.photoUri ? 60000 : 45000 }),
       complaintMeta(),
     ]);
     return toComplaint(c, meta.statuses);
@@ -173,6 +198,39 @@ export const noticesApi = {
   },
 };
 
+export const businessApi = {
+  /** Popular businesses, nearest first when a location is given. */
+  list: (near?: { lat: number; lng: number }, limit = 20) =>
+    request<Business[]>("GET", "/api/businesses", { query: { lat: near?.lat, lng: near?.lng, limit } }),
+};
+
 export const incidentApi = {
   list: () => request<Incident[]>("GET", "/api/incidents"),
+};
+
+/** Weather: live city conditions from core; forecast and air quality straight from Open-Meteo (no key). */
+export const weatherApi = {
+  current: (lat?: number, lng?: number) =>
+    request<CityWeather>("GET", "/api/weather/current", { query: { city: "Dehradun", latitude: lat, longitude: lng }, auth: false }),
+  forecast: (lat: number, lng: number) =>
+    request<WeatherForecast>("GET", "/v1/forecast", {
+      baseUrl: "https://api.open-meteo.com",
+      auth: false,
+      query: {
+        latitude: lat,
+        longitude: lng,
+        current: "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m",
+        hourly: "temperature_2m,weather_code,precipitation_probability",
+        daily: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset",
+        timezone: "Asia/Kolkata",
+        forecast_days: 6,
+        forecast_hours: 12,
+      },
+    }),
+  air: (lat: number, lng: number) =>
+    request<AirQuality>("GET", "/v1/air-quality", {
+      baseUrl: "https://air-quality-api.open-meteo.com",
+      auth: false,
+      query: { latitude: lat, longitude: lng, current: "us_aqi,pm2_5,pm10" },
+    }),
 };

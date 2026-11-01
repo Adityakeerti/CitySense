@@ -87,7 +87,7 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
     return bearingDeg(a[0].coords[0], a.at(-1).coords.at(-1));
   }, [geo]);
   const overview = useMemo(() => geo && ({
-    longitude: geo.center[1], latitude: geo.center[0], zoom: 16.9, pitch: 60, bearing: arterialBearing - 90,
+    longitude: geo.center[1], latitude: geo.center[0], zoom: 15.4, pitch: 55, bearing: arterialBearing - 90,
   }), [geo, arterialBearing]);
   const streetLevel = useCallback(() => {
     const j = geo.junctions[Math.floor(geo.junctions.length / 2)];
@@ -95,6 +95,7 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
   }, [geo, arterialBearing]);
 
   const [view, setView] = useState(null);
+  const mapRef = useRef(null);
   const [satMax, setSatMax] = useState(ESRI_DEFAULT_MAX);
   useEffect(() => {
     if (!geo) return;
@@ -205,8 +206,8 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
 
     // --- road surface coloured by speed -------------------------------------------------------------
     const roads = geo.cells.map((c) => ({
-      path: c.coords.map(ll), color: speedRGBA(ratio[c.id] ?? 1), width: c.kind === "arterial" ? 8 : 6,
-      tip: `Cell ${c.id} (${c.kind}) · ${fmt((ratio[c.id] ?? 1) * 100, 0)}% of free-flow speed · ${fmt(veh[c.id], 1)} veh`,
+      path: c.coords.map(ll), color: speedRGBA(ratio[c.id] ?? 1, c.synthetic ? 70 : 150), width: c.kind === "arterial" ? 8 : 6,
+      tip: `Cell ${c.id} (${c.kind}${c.synthetic ? ", schematic: no mapped road on this side" : ""}) · ${fmt((ratio[c.id] ?? 1) * 100, 0)}% of free-flow speed · ${fmt(veh[c.id], 1)} veh`,
     }));
     const closures = geo.cells.filter((c) => disrupted.has(c.id)).map((c) => ({ path: c.coords.map(ll), tip: `Capacity disruption on cell ${c.id}` }));
 
@@ -251,11 +252,14 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
     const poles = [];
     for (const j of geo.junctions) {
       const js = state.junctions[j.id];
-      for (const [cellId, phase, label] of [[j.arterial_approach, j.arterial_phase, "arterial"], [j.cross_approach, j.cross_phase, "cross street"]]) {
+      const legs = j.cross_approaches || [j.cross_approach];
+      const approaches = [[j.arterial_approach, j.arterial_phase, "arterial"], ...legs.map((c, i) => [c, j.cross_phase, legs.length > 1 ? `side road ${i ? "south/right" : "north/left"}` : "cross street"])];
+      for (const [cellId, phase, label] of approaches) {
         const c = cellById[cellId];
         const end = along(c.coords, model.cellCum[cellId], model.cellLen[cellId] - 1.5);
         const go = js?.phase === phase;
-        const tip = `J${j.id + 1} ${label}: ${go ? "GREEN" : "RED"} · ${fmt(js?.time_in_phase, 0)}s in phase · queue ${fmt(label === "arterial" ? js?.art_queue : js?.cross_queue)} veh · last switch #${js?.last_decision ?? "–"}`;
+        const legQ = js?.cross_leg_queues?.[legs.indexOf(cellId)];
+        const tip = `J${j.id + 1} ${label}: ${go ? "GREEN" : "RED"} · ${fmt(js?.time_in_phase, 0)}s in phase · queue ${fmt(label === "arterial" ? js?.art_queue : legQ ?? js?.cross_queue)} veh · last switch #${js?.last_decision ?? "–"}`;
         bars.push({ path: [ll(offset(end.p, end.heading, -4.6)), ll(offset(end.p, end.heading, 4.6))], color: go ? GREEN : RED, tip });
         poles.push({ p: offset(end.p, end.heading, 5.6), color: go ? GREEN : RED, tip });
       }
@@ -263,8 +267,9 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
     const jLabels = geo.junctions.map((j) => ({ p: [j.lat, j.lon], text: `J${j.id + 1}` }));
 
     // --- people: neighbourhood towers and walkers along real footpaths ------------------------------
+    const bigCut = [...(clusters || [])].map((c) => c.population).sort((a, b) => b - a)[9] ?? 0;
     const towers = (clusters || []).filter((c) => c.location).map((c, i) => ({
-      p: c.location, color: hexToRgb(clusterColor(i), 150), h: Math.max(10, c.population / 45), id: c.id,
+      p: c.location, color: hexToRgb(clusterColor(i), 150), h: Math.max(8, c.population / 30), id: c.id, big: c.population >= bigCut,
       label: c.name, plan: c.last ? `${c.last.plan.intent} · ${c.last.plan.departure.replace("_", " ")}` : "planning…",
       tip: `${c.name} · ${c.population} people${c.last ? ` · ${c.last.clock}: ${c.last.plan.intent}, leave ${c.last.plan.departure.replace("_", " ")}, share ${c.last.plan.share} (${c.last.decided_by === "llm" ? "Gemma" : "fallback"}) — “${c.last.plan.reason}”` : ""}`,
     }));
@@ -294,16 +299,20 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
     }
 
     // --- congestion points: red ripples (click to trace the root cause) ----------------------------
+    const minAge = topology.diagnosis_min_jam_age_sec ?? 0;
     const ripplePts = (state.congestion_points || []).map((cp) => {
       const c = cellById[cp.head_cell];
       const end = along(c.coords, model.cellCum[cp.head_cell], model.cellLen[cp.head_cell] * 0.5);
-      return { ...cp, p: end.p, tip: `Congestion on ${cp.name}: ${cp.cells.length} slow cells, slowest at ${fmt(cp.min_speed_ratio * 100, 0)}% of free flow since ${simClock(cp.since_sec).full}. Click to trace the root cause.` };
+      const age = state.sim_time - cp.since_sec;
+      const mature = age >= minAge;
+      const head = `Congestion on ${cp.name}: ${cp.cells.length} slow cells, slowest at ${fmt(cp.min_speed_ratio * 100, 0)}% of free flow, for ${fmt(age, 0)} s.`;
+      return { ...cp, p: end.p, mature, tip: mature ? `${head} Click to trace the root cause.` : `${head} Maturing: traceable in ${fmt(minAge - age, 0)} s (simulated).` };
     });
     const wall = performance.now() / 1000;
     const rings = [];
-    for (const rp of ripplePts) for (let k = 0; k < 3; k++) {
-      const ph = (wall / 1.8 + k / 3) % 1;
-      rings.push({ p: rp.p, r: 6 + ph * 46, a: Math.round((1 - ph) * 230) });
+    for (const rp of ripplePts) for (let k = 0; k < (rp.mature ? 3 : 2); k++) {
+      const ph = (wall / (rp.mature ? 1.8 : 2.6) + k / 3) % 1;
+      rings.push({ p: rp.p, r: 6 + ph * (rp.mature ? 46 : 26), a: Math.round((1 - ph) * 230), c: rp.mature ? [232, 36, 36] : [240, 150, 40] });
     }
 
     // --- active root-cause trace overlay ------------------------------------------------------------
@@ -341,11 +350,11 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
       new SimpleMeshLayer({ id: "cars", data: cars, mesh: CAR, getPosition: (d) => [d.p[1], d.p[0], 0.8], getOrientation: (d) => [0, 90 - d.heading, 0], getScale: CAR_SCALE, getColor: (d) => d.color, pickable: true, material: { ambient: 0.55, diffuse: 0.6, shininess: 40, specularColor: [255, 255, 255] }, onClick: ({ object }) => object?.platoon && setFollow(object.platoon) }),
       new ColumnLayer({ id: "signal-poles", data: poles, getPosition: (d) => [d.p[1], d.p[0]], getElevation: 6.5, radius: 0.7, diskResolution: 12, extruded: true, getFillColor: (d) => d.color, pickable: true, material: { ambient: 0.9, diffuse: 0.3 } }),
       new ScatterplotLayer({ id: "walkers", data: walkerHeads, getPosition: (d) => [d.p[1], d.p[0], 1], getFillColor: (d) => d.color, getLineColor: [255, 255, 255, 255], stroked: true, lineWidthMinPixels: 1.5, getRadius: 2.2, radiusUnits: "meters", radiusMinPixels: 3, pickable: true }),
-      new ColumnLayer({ id: "neighbourhoods", data: towers, getPosition: (d) => [d.p[1], d.p[0]], getElevation: (d) => d.h, radius: 9, diskResolution: 24, extruded: true, getFillColor: (d) => d.color, pickable: true, material: { ambient: 0.6, diffuse: 0.5 } }),
-      new TextLayer({ id: "neighbourhood-labels", data: towers, getPosition: (d) => [d.p[1], d.p[0], d.h + 10], getText: (d) => d.label, getSize: 11, getColor: [255, 255, 255, 255], getBackgroundColor: [12, 16, 14, 150], background: true, backgroundPadding: [5, 2], fontFamily: "Poppins, system-ui, sans-serif", fontWeight: 500, billboard: true, characterSet: "auto", sizeMinPixels: 9, sizeMaxPixels: 12 }),
+      new ColumnLayer({ id: "neighbourhoods", data: towers, getPosition: (d) => [d.p[1], d.p[0]], getElevation: (d) => d.h, radius: 10, diskResolution: 24, extruded: true, getFillColor: (d) => d.color, pickable: true, material: { ambient: 0.6, diffuse: 0.5 } }),
+      new TextLayer({ id: "neighbourhood-labels", data: towers.filter((t) => t.big || view?.zoom >= 16.5), getPosition: (d) => [d.p[1], d.p[0], d.h + 10], getText: (d) => d.label, getSize: 11, getColor: [255, 255, 255, 255], getBackgroundColor: [12, 16, 14, 150], background: true, backgroundPadding: [5, 2], fontFamily: "Poppins, system-ui, sans-serif", fontWeight: 500, billboard: true, characterSet: "auto", sizeMinPixels: 9, sizeMaxPixels: 12 }),
       ...traceLayers,
-      new ScatterplotLayer({ id: "ripples", data: rings, getPosition: (d) => [d.p[1], d.p[0], 1.5], getRadius: (d) => d.r, radiusUnits: "meters", stroked: true, filled: false, getLineColor: (d) => [232, 36, 36, d.a], lineWidthUnits: "meters", getLineWidth: 2.2, lineWidthMinPixels: 1.5 }),
-      new ScatterplotLayer({ id: "congestion-points", data: ripplePts, getPosition: (d) => [d.p[1], d.p[0], 2], getRadius: 6, radiusUnits: "meters", radiusMinPixels: 7, getFillColor: [222, 28, 28, 245], stroked: true, getLineColor: [255, 255, 255, 255], lineWidthMinPixels: 2, pickable: true, onClick: ({ object }) => object && onTrace?.(object) }),
+      new ScatterplotLayer({ id: "ripples", data: rings, getPosition: (d) => [d.p[1], d.p[0], 1.5], getRadius: (d) => d.r, radiusUnits: "meters", stroked: true, filled: false, getLineColor: (d) => [...d.c, d.a], lineWidthUnits: "meters", getLineWidth: 2.2, lineWidthMinPixels: 1.5 }),
+      new ScatterplotLayer({ id: "congestion-points", data: ripplePts, getPosition: (d) => [d.p[1], d.p[0], 2], getRadius: 6, radiusUnits: "meters", radiusMinPixels: 7, getFillColor: (d) => (d.mature ? [222, 28, 28, 245] : [240, 150, 40, 235]), stroked: true, getLineColor: [255, 255, 255, 255], lineWidthMinPixels: 2, pickable: true, onClick: ({ object }) => object && onTrace?.(object) }),
       new TextLayer({ id: "junction-labels", data: jLabels, getPosition: (d) => [d.p[1], d.p[0], 9], getText: (d) => d.text, getSize: 13, getColor: [255, 255, 255, 255], getBackgroundColor: [30, 70, 48, 230], background: true, backgroundPadding: [5, 2], fontFamily: "Poppins, system-ui, sans-serif", fontWeight: 600, billboard: true }),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -371,6 +380,39 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
     map.on("styledata", () => { ensure(); sky(); });
   }, [theme]);
 
+  // When a root-cause trace arrives, frame the jam and its origin (left of the drawer).
+  useEffect(() => {
+    if (!diagnosis?.found || !geo || !mapRef.current) return;
+    const ids = new Set([...diagnosis.jam.cells, diagnosis.origin.cell]);
+    const pts = geo.cells.filter((c) => ids.has(c.id)).flatMap((c) => c.coords);
+    if (!pts.length) return;
+    const lats = pts.map((p) => p[0]), lons = pts.map((p) => p[1]);
+    setFollow(null);
+    const drawer = Math.min(560, window.innerWidth * 0.5);
+    mapRef.current.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+      { padding: { top: 90, bottom: 60, left: 60, right: drawer }, pitch: 52, bearing: arterialBearing - 90, duration: 1400, maxZoom: 18.2 });
+  }, [diagnosis, geo, arterialBearing]);
+
+  // Overview frames the whole corridor plus every neighbourhood (the locality is ~2.7 km long).
+  const fitOverview = useCallback((duration = 1000) => {
+    if (!geo || !mapRef.current) return;
+    const pts = [...geo.cells.flatMap((c) => c.coords), ...(clusters || []).map((c) => c.location).filter(Boolean)];
+    const lats = pts.map((p) => p[0]), lons = pts.map((p) => p[1]);
+    setFollow(null);
+    // Fit the rotated bounds flat (fitBounds with pitch over-zooms out), then tilt with a small zoom boost.
+    const cam = mapRef.current.cameraForBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+      { padding: { top: 90, bottom: 30, left: 30, right: 30 }, bearing: arterialBearing - 90 });
+    if (!cam) return;
+    const c = cam.center;
+    mapRef.current.easeTo({ center: c, zoom: cam.zoom + 0.35, pitch: 50, bearing: arterialBearing - 90, duration });
+  }, [geo, clusters, arterialBearing]);
+  const framed = useRef(false);
+  useEffect(() => {
+    if (framed.current || !mapRef.current || !clusters?.length || new URLSearchParams(location.search).get("cam")) return;
+    framed.current = true;
+    fitOverview(0);
+  });
+
   const followed = heads.find((h) => h.id === follow);
   const decisionById = useMemo(() => Object.fromEntries((decisions || []).map((d) => [d.id, d])), [decisions]);
 
@@ -380,6 +422,7 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
   return (
     <>
       <MapGL
+        ref={mapRef}
         {...view}
         onMove={(e) => { if (follow === null) setView(e.viewState); }}
         mapStyle={mapStyle}
@@ -397,7 +440,7 @@ export default function CityMap3D({ topology, state, clusters, traces, decisions
       </MapGL>
 
       <div className="map-overlay tr cam-bar" role="group" aria-label="Camera">
-        <button className={follow === null && view.pitch < 70 ? "on" : ""} onClick={() => { setFollow(null); setView(overview); }}><MapIcon size={13} /> Overview</button>
+        <button className={follow === null && view.pitch < 70 ? "on" : ""} onClick={() => fitOverview()}><MapIcon size={13} /> Overview</button>
         <button onClick={() => { setFollow(null); setView(streetLevel()); }}><Eye size={13} /> Street level</button>
         <button className={follow !== null ? "on" : ""} disabled={!heads.length} onClick={() => {
           const ids = heads.map((h) => h.id);

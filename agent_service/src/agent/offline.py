@@ -261,7 +261,8 @@ async def offline_chat(
     )
     from src.agent.orchestrator import finalize_plan
 
-    plan_fields = {"plan": outcome.plan, "toolCalls": outcome.tool_calls, "actionData": outcome.action_data}
+    plan_fields = {"plan": outcome.plan, "toolCalls": outcome.tool_calls, "actionData": outcome.action_data,
+                   "clientActions": outcome.client_actions}
     if not handled:
         finalize_plan(outcome.plan, "ANSWERED")
     if handled:
@@ -423,8 +424,13 @@ async def offline_chat(
             **plan_fields,
         )
 
-    # Soft, helpful civic fallback
-    fallback_msg = (
+    # Main agent answers in its own words (conversation / capabilities / honest "not verified");
+    # the template below is only used when no LLM is reachable.
+    from src.agent.composer import compose
+
+    composed_fallback = await compose(intent="no_verified_info", message=request.message, language=lang,
+                                      history=prior_history)
+    fallback_msg = composed_fallback or (
         "देहरादून नगर निगम में नागरिक सेवाओं के लिए आप सीधे शिकायत दर्ज कर सकते हैं या नागरिक हेल्पलाइन पर संपर्क कर सकते हैं:\n\n"
         "• **नागरिक शिकायत:** सड़क के गड्ढे, कचरा, स्ट्रीट लाइट या नाली की समस्या दर्ज करें\n"
         "• **हेल्पलाइन:** 1800-180-4107 या 0135-2653572\n"
@@ -469,7 +475,9 @@ async def offline_confirm_action(principal: Principal, token: str) -> ConfirmRes
         try:
             from src.agent.tools import execute_complaint
 
-            result = await execute_complaint(action["args"], token, principal.user_id)
+            from src.agent.media import photo_for
+
+            result = await execute_complaint(action["args"], token, principal.user_id, await photo_for(None, token))
         except Exception:
             action["status"] = "failed"
             return ConfirmResponse(status="failed", detail="Complaint service unavailable; please retry later")

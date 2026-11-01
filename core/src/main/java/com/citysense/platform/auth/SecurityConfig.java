@@ -39,7 +39,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/avatars/**").permitAll()
                         // Complaints are private: only the option lists and public city bulletins are open.
                         // Per-complaint ownership, roles and transitions are enforced in CivicController/CivicService.
-                        .requestMatchers(HttpMethod.GET, "/api/complaints/meta", "/api/city-events").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/complaints/meta", "/api/city-events", "/api/businesses").permitAll()
                         .requestMatchers("/api/complaints", "/api/complaints/**",
                                 "/api/city-events", "/api/city-events/**").authenticated()
                         .requestMatchers("/ws/**", "/ws-sockjs/**").permitAll()

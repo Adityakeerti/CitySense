@@ -300,8 +300,14 @@ public class CivicService {
 
     @Transactional(readOnly = true)
     public List<CivicDtos.CityEventResponse> listCityEvents() {
-        return cityEventRepo.findAllByOrderByStartsAtDesc()
-                .stream()
+        // Upcoming and ongoing events first (soonest at the top), then past ones newest-first.
+        java.time.Instant cutoff = java.time.Instant.now().minus(java.time.Duration.ofHours(12));
+        List<CityEvent> all = cityEventRepo.findAllByOrderByStartsAtDesc();
+        java.util.function.Predicate<CityEvent> current =
+                e -> !e.getStartsAt().isBefore(cutoff) || (e.getEndsAt() != null && e.getEndsAt().isAfter(cutoff));
+        return java.util.stream.Stream.concat(
+                        all.stream().filter(current).sorted(java.util.Comparator.comparing(CityEvent::getStartsAt)),
+                        all.stream().filter(current.negate()))
                 .map(CivicDtos.CityEventResponse::from)
                 .toList();
     }

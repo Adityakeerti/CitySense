@@ -7,6 +7,7 @@ import {
   Animated,
   KeyboardAvoidingView,
   Linking,
+  PixelRatio,
   Platform,
   ScrollView,
   type ScrollViewInstance,
@@ -20,6 +21,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { errorMessage } from "../../api/client";
 import { agentApi, avatarApi } from "../../api/endpoints";
 import type { Avatar, ChatIntent, PendingAgentAction, PlanStep } from "../../api/types";
+import { PendingActionCard } from "../../components/PendingActionCard";
 import { useAuth } from "../../auth/AuthContext";
 import { LinkText } from "../../components/LinkText";
 import { ErrorBanner, Loading } from "../../components/StateViews";
@@ -70,6 +72,21 @@ const CHIPS: { intent: ChatIntent; label: string; icon: keyof typeof Ionicons.gl
   { intent: "WEBSITE", label: "Official Website", icon: "globe-outline", needs: "websiteUrl" },
 ];
 
+/**
+ * Portraits are shown at most 3 device pixels per image pixel. Hi-res art fills the stage as before;
+ * small legacy thumbnails stand crisp at the bottom of the stage instead of being stretched into a blur.
+ * Hidden until the image reports its size so a thumbnail never flashes up blurry.
+ */
+const MAX_UPSCALE = 3;
+function heroStyle(px: { w: number; h: number } | null) {
+  if (!px) return [StyleSheet.absoluteFill, { opacity: 0 }];
+  const k = MAX_UPSCALE / PixelRatio.get();
+  return [
+    { position: "absolute" as const, bottom: 0, alignSelf: "center" as const },
+    { width: "100%" as const, height: "100%" as const, maxWidth: px.w * k, maxHeight: px.h * k },
+  ];
+}
+
 export default function AvatarScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
@@ -79,6 +96,7 @@ export default function AvatarScreen() {
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [heroPx, setHeroPx] = useState<{ w: number; h: number } | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const session = useRef<string | undefined>(undefined);
@@ -102,6 +120,7 @@ export default function AvatarScreen() {
 
   useEffect(() => {
     setAvatar(null);
+    setHeroPx(null);
     setMessages([]);
     session.current = undefined;
     void load();
@@ -169,24 +188,10 @@ export default function AvatarScreen() {
     if (problem) setMessages((m) => [...m, { id: `${Date.now()}-err`, from: "avatar", text: `⚠️ ${problem}` }]);
   };
 
-  /** Agent proposes, citizen disposes: only an explicit tap files the drafted complaint. */
-  const decide = async (msg: Message, confirm: boolean) => {
-    if (!msg.pending) return;
-    patch(msg.id, { pendingState: "working" });
-    try {
-      const res = confirm ? await agentApi.confirm(msg.pending.token) : await agentApi.cancel(msg.pending.token);
-      const text =
-        res.status === "executed"
-          ? `✅ Complaint filed. Tracking ID: ${res.result?.trackingId ?? "—"}${res.result?.assignedWorker ? `\nAssigned to: ${res.result.assignedWorker}` : ""}`
-          : res.status === "cancelled"
-            ? "Okay — I've discarded that draft."
-            : `⚠️ ${res.detail ?? "That action could not be completed."}`;
-      patch(msg.id, { pendingState: "done" });
-      setMessages((m) => [...m, { id: `${Date.now()}-act`, from: "avatar", text }]);
-    } catch (e) {
-      patch(msg.id, { pendingState: "open" });
-      setMessages((m) => [...m, { id: `${Date.now()}-err`, from: "avatar", text: `⚠️ ${errorMessage(e)}` }]);
-    }
+  /** Agent proposes, citizen disposes: only an explicit tap files the drafted complaint (photo optional). */
+  const settle = (msg: Message, outcome: string) => {
+    patch(msg.id, { pendingState: "done" });
+    setMessages((m) => [...m, { id: `${Date.now()}-act`, from: "avatar", text: outcome }]);
   };
 
   // Optimistic toggle; core returns the authoritative count.
@@ -255,8 +260,9 @@ export default function AvatarScreen() {
           <Animated.View style={[styles.hero, { opacity: heroOpacity }]}>
             <Image
               source={{ uri: absoluteUrl(avatar.heroImageUrl) }}
-              style={StyleSheet.absoluteFill}
+              style={heroStyle(heroPx)}
               contentFit="contain"
+              onLoad={(e) => setHeroPx({ w: e.source.width, h: e.source.height })}
               accessibilityLabel={`${avatar.name}, ${avatar.title}`}
             />
           </Animated.View>
@@ -308,17 +314,7 @@ export default function AvatarScreen() {
                     </View>
                   ) : null}
                   {m.pending && m.pendingState !== "done" ? (
-                    <View style={styles.pending}>
-                      <Text style={styles.planStep}>{m.pending.summary}</Text>
-                      <View style={styles.pendingRow}>
-                        <Tap style={[styles.pendingBtn, { backgroundColor: colors.success }]} disabled={m.pendingState === "working"} onPress={() => decide(m, true)} accessibilityLabel="Confirm and file complaint">
-                          <Text style={styles.callText}>{m.pendingState === "working" ? "Filing…" : "Confirm"}</Text>
-                        </Tap>
-                        <Tap style={[styles.pendingBtn, { backgroundColor: "#9A9AA3" }]} disabled={m.pendingState === "working"} onPress={() => decide(m, false)} accessibilityLabel="Discard draft">
-                          <Text style={styles.callText}>Cancel</Text>
-                        </Tap>
-                      </View>
-                    </View>
+                    <PendingActionCard pending={m.pending} onDone={(o) => settle(m, o)} compact />
                   ) : null}
                   {m.from === "avatar" && m.text && !m.text.startsWith("⚠️") ? (
                     <Tap
@@ -526,8 +522,5 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   callText: { fontFamily: fonts.bold, fontSize: 12, color: "#fff" },
-  pending: { marginTop: 8, padding: 8, borderRadius: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, gap: 6 },
-  pendingRow: { flexDirection: "row", gap: 8 },
-  pendingBtn: { borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 6 },
   play: { alignSelf: "flex-end", marginTop: 4 },
 });

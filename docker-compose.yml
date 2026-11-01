@@ -11,7 +11,8 @@
 #                                   ├─ /api/emergency/*           → emergency-routing:8002 (dispatch, corridors)
 #                                   ├─ /api/*, /ws, /avatars/*    → core:8080            (auth, geo, avatars, complaints)
 #                                   └─ /*                         → citizen web portal (static)
-#   postgres-postgis:5432 is shared by core (Flyway, schema public) and agent-service (Alembic, schemas ai/agent).
+#   postgres-postgis:5432 is shared: core (Flyway, schema public), agent-service (Alembic, schemas ai/agent),
+#   complaint-module (schema civic_flow). See docs/DATABASE.md.
 
 x-llm-keys: &llm-keys
   GROQ_API_KEY: ${GROQ_API_KEY:-}
@@ -129,9 +130,14 @@ services:
     build: ./complaint_module
     image: citysense-complaints:latest
     container_name: citysense-complaints
+    depends_on:
+      postgres-postgis:
+        condition: service_healthy
     environment:
       <<: *llm-keys
       PORT: 8001
+      # Complaints + notices live in the shared database (schema civic_flow); photos stay on the volume.
+      COMPLAINT_DATABASE_URL: postgresql://${POSTGRES_USER:-citysense}:${POSTGRES_PASSWORD:-citysense}@postgres-postgis:5432/${POSTGRES_DB:-citysense}
       # Govt-portal notice publish/revoke (X-Operator-Key); unset = publishing disabled
       OPERATOR_KEY: ${OPERATOR_KEY:-}
     volumes:
