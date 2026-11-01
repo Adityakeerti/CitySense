@@ -5,6 +5,7 @@ written with the same atomic-replace pattern. Field names are camelCase because 
 existing notice schema (and the mobile app) already use them.
 """
 import datetime
+import hmac
 import json
 import os
 import random
@@ -14,7 +15,7 @@ import threading
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 
 from .storage import STATE_DIR
@@ -23,6 +24,16 @@ NOTICES_FILE = os.path.join(STATE_DIR, "notices.json")
 _LOCK = threading.RLock()
 
 router = APIRouter(prefix="/api/notices", tags=["notices"])
+
+
+def require_operator(x_operator_key: Optional[str] = Header(None)) -> None:
+    """Publishing and revoking are operator actions: they need X-Operator-Key == $OPERATOR_KEY.
+    Reading stays public (the citizen app's feed). Without a configured key, writes are disabled."""
+    expected = os.getenv("OPERATOR_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Notice publishing is disabled: OPERATOR_KEY is not configured")
+    if not x_operator_key or not hmac.compare_digest(x_operator_key.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Invalid or missing operator key")
 
 
 class NoticeCreate(BaseModel):
@@ -103,9 +114,9 @@ def list_notices(
     return notices[:limit]
 
 
-@router.post("", response_model=Notice, status_code=201)
+@router.post("", response_model=Notice, status_code=201, dependencies=[Depends(require_operator)])
 def publish_notice(req: NoticeCreate):
-    """Publish a notice from the govt portal. Demo deployment: no publisher authentication yet."""
+    """Publish a notice from the govt portal (operator key required)."""
     now = datetime.datetime.now(datetime.timezone.utc)
     dept_code = (re.sub(r"[^A-Za-z]", "", req.department)[:4] or "GOV").upper()
     notice = Notice(
@@ -123,7 +134,7 @@ def publish_notice(req: NoticeCreate):
     return notice
 
 
-@router.delete("/{notice_id}", status_code=204)
+@router.delete("/{notice_id}", status_code=204, dependencies=[Depends(require_operator)])
 def revoke_notice(notice_id: str):
     with _LOCK:
         notices = _load()

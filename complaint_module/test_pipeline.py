@@ -5,6 +5,8 @@ import unittest
 
 # Keep test writes away from the real data/complaints.json.
 os.environ.setdefault("COMPLAINT_STATE_DIR", tempfile.mkdtemp(prefix="complaint-test-"))
+os.environ["OPERATOR_KEY"] = "test-operator-key"
+OPERATOR = {"X-Operator-Key": "test-operator-key"}
 from fastapi.testclient import TestClient
 
 # Add module to sys.path
@@ -294,11 +296,11 @@ class TestComplaintModule(unittest.TestCase):
         if os.path.exists(notices_mod.NOTICES_FILE):
             os.remove(notices_mod.NOTICES_FILE)
 
-        first = self.client.post("/api/notices", json={"title": "Water supply shutdown", "department": "Jal Sansthan"})
+        first = self.client.post("/api/notices", json={"title": "Water supply shutdown", "department": "Jal Sansthan"}, headers=OPERATOR)
         self.assertEqual(first.status_code, 201, first.text)
         second = self.client.post("/api/notices", json={
             "title": "Road closure on Rajpur Road", "department": "PWD", "priority": "Urgent", "tags": [" roads ", ""],
-        }).json()
+        }, headers=OPERATOR).json()
         self.assertTrue(second["id"].startswith("NOT-"))
         self.assertTrue(second["referenceNumber"].startswith("UK-GOV/PWD/"))
         self.assertEqual(second["tags"], ["roads"])
@@ -306,8 +308,8 @@ class TestComplaintModule(unittest.TestCase):
         listed = self.client.get("/api/notices").json()
         self.assertEqual([n["id"] for n in listed], [second["id"], first.json()["id"]])
 
-        self.assertEqual(self.client.delete(f"/api/notices/{second['id']}").status_code, 204)
-        self.assertEqual(self.client.delete(f"/api/notices/{second['id']}").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/notices/{second['id']}", headers=OPERATOR).status_code, 204)
+        self.assertEqual(self.client.delete(f"/api/notices/{second['id']}", headers=OPERATOR).status_code, 404)
         self.assertEqual(len(self.client.get("/api/notices").json()), 1)
 
     def test_13_notices_validation_and_expiry(self):
@@ -316,14 +318,28 @@ class TestComplaintModule(unittest.TestCase):
         if os.path.exists(notices_mod.NOTICES_FILE):
             os.remove(notices_mod.NOTICES_FILE)
 
-        self.assertEqual(self.client.post("/api/notices", json={"title": "x", "department": "PWD"}).status_code, 422)
+        self.assertEqual(self.client.post("/api/notices", json={"title": "x", "department": "PWD"}, headers=OPERATOR).status_code, 422)
         self.assertEqual(self.client.post("/api/notices", json={
-            "title": "Bad date", "department": "PWD", "expiryDate": "not-a-date"}).status_code, 422)
+            "title": "Bad date", "department": "PWD", "expiryDate": "not-a-date"}, headers=OPERATOR).status_code, 422)
 
         self.client.post("/api/notices", json={
-            "title": "Old advisory", "department": "PWD", "expiryDate": "2020-01-01T00:00:00Z"})
+            "title": "Old advisory", "department": "PWD", "expiryDate": "2020-01-01T00:00:00Z"}, headers=OPERATOR)
         self.assertEqual(self.client.get("/api/notices").json(), [])
         self.assertEqual(len(self.client.get("/api/notices?include_expired=true").json()), 1)
+
+
+    def test_14_notice_writes_need_operator_key(self):
+        """Reads are public; publish/revoke need the operator key; no key configured disables writes."""
+        body = {"title": "Unauthorised notice", "department": "PWD"}
+        self.assertEqual(self.client.post("/api/notices", json=body).status_code, 401)
+        self.assertEqual(self.client.post("/api/notices", json=body, headers={"X-Operator-Key": "wrong"}).status_code, 401)
+        self.assertEqual(self.client.delete("/api/notices/NOT-X", headers={"X-Operator-Key": "wrong"}).status_code, 401)
+        self.assertEqual(self.client.get("/api/notices").status_code, 200)
+        os.environ["OPERATOR_KEY"] = ""
+        try:
+            self.assertEqual(self.client.post("/api/notices", json=body, headers=OPERATOR).status_code, 503)
+        finally:
+            os.environ["OPERATOR_KEY"] = "test-operator-key"
 
 
 if __name__ == "__main__":

@@ -132,6 +132,8 @@ services:
     environment:
       <<: *llm-keys
       PORT: 8001
+      # Govt-portal notice publish/revoke (X-Operator-Key); unset = publishing disabled
+      OPERATOR_KEY: ${OPERATOR_KEY:-}
     volumes:
       - complaint-state:/app/state
     ports:

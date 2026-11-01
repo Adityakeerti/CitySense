@@ -3,7 +3,8 @@
 #
 # PUBLIC_HOST is the internet-facing name (the ngrok static domain, see scripts/tunnel.sh). Requests
 # arriving under that name may only use what the citizen app needs; operator tools (dashboard, demo
-# token minting, emergency console, complaint resolve/escalate, notice publishing) stay LAN-only.
+# token minting, emergency console, complaint resolve/escalate) stay LAN-only. Notice publishing is
+# allowed publicly only with an X-Operator-Key header, which complaint-module validates.
 {$SITE_ADDRESS::80} {
 	encode zstd gzip
 
@@ -20,12 +21,14 @@
 	@publicOperator {
 		host {$PUBLIC_HOST:public.invalid}
 		path /agent /agent/* /api/emergency/* /api/complaint-flow/*
-		not path /api/complaint-flow/api/meta /api/complaint-flow/api/notices /api/complaint-flow/api/complaints /api/complaint-flow/api/complaints/*
+		not path /api/complaint-flow/api/meta /api/complaint-flow/api/notices /api/complaint-flow/api/notices/* /api/complaint-flow/api/complaints /api/complaint-flow/api/complaints/*
 	}
+	# Notice publish/revoke from the Vercel portal arrives here; complaint-module checks the key's value.
 	@publicNoticeWrite {
 		host {$PUBLIC_HOST:public.invalid}
 		path /api/complaint-flow/api/notices*
 		not method GET HEAD
+		not header X-Operator-Key *
 	}
 	@publicComplaintAction {
 		host {$PUBLIC_HOST:public.invalid}
