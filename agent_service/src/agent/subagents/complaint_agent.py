@@ -99,6 +99,12 @@ def extract_location(text: str) -> str | None:
 TRACKING_RE = re.compile(r"\b(NND-2026-\d{4}|CMP-\d{4}-[A-F0-9]{6}|MOCK-[A-F0-9]+|\b0?84[1-9]\b)", re.IGNORECASE)
 ESCALATE_RE = re.compile(r"escalat|overdue|no action|not resolved|still pending|ऊपर भेज|एस्केलेट", re.IGNORECASE)
 REASSIGN_RE = re.compile(r"reassign|another worker|different (?:worker|team)|rapid action|दूसरा कर्मचारी", re.IGNORECASE)
+# Issues where a photo makes the difference for the field crew.
+PHOTO_HELPS_RE = re.compile(
+    r"sewage|sewer|drain|overflow|garbage|trash|waste|dump|dead animal|manhole|leak|waterlog|encroach|pothole|"
+    r"crater|broken|debris|नाली|सीवर|कचरा|कूड़ा|गड्ढा|मैनहोल|जलभराव",
+    re.IGNORECASE,
+)
 VERIFY_RE = re.compile(r"verify|proof|evidence|really (?:fixed|resolved)|सत्यापित|सबूत", re.IGNORECASE)
 
 
@@ -122,7 +128,9 @@ class CivicComplaintSpecialist(BaseSubAgent):
         history = kwargs.get("history") or []
         last_turn_context = ""
         if history:
-            last_turn_context = " ".join([m.get("content", "") for m in history[-3:] if isinstance(m, dict) and m.get("content")])
+            last_turn_context = " ".join(
+                [m.get("content", "") for m in history[-4:] if isinstance(m, dict) and m.get("role") == "user" and m.get("content")]
+            )
         full_query_context = f"{last_turn_context} {message}".lower()
 
         # Step 0A: Check if tracking a specific ticket ID (e.g., "status of NND-2026-0841")
@@ -364,6 +372,7 @@ class CivicComplaintSpecialist(BaseSubAgent):
             action_args.update(latitude=float(kwargs["latitude"]), longitude=float(kwargs["longitude"]))
 
         action_dict = {
+            "photo_suggested": bool(PHOTO_HELPS_RE.search(f"{category} {description}")),
             "token": token,
             "action_type": "create_complaint",
             "tool": "create_complaint",

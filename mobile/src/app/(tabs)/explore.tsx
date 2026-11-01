@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { ExploreMap, MAP_PITCH } from "../../components/ExploreMap";
 import { PlaceSheet } from "../../components/PlaceSheet";
+import { useAssistantOptional } from "../../assistant/AssistantContext";
+import { AssistantBar } from "../../assistant/AssistantLayer";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -37,6 +39,7 @@ export default function Explore() {
   // Spot the main agent is briefing about (tap anywhere on the map).
   const [tapped, setTapped] = useState<LatLng | null>(null);
   const { language } = useAuth();
+  const assistant = useAssistantOptional();
   // Camera commands sent before the native map finishes loading are dropped.
   const [mapReady, setMapReady] = useState(false);
 
@@ -109,6 +112,15 @@ export default function Explore() {
     router.push({ pathname: "/avatar/[id]", params: { id: a.id } });
   };
 
+  // "Show Clock Tower on the map" from the main agent: fly there and drop a pin.
+  useEffect(() => {
+    const f = assistant?.mapFocus;
+    if (!f || !mapReady) return;
+    setQuery("");
+    setPlacePin({ name: f.label ?? "Here", displayName: f.label ?? "", latitude: f.latitude, longitude: f.longitude, type: "agent" });
+    camera.current?.flyTo({ center: [f.longitude, f.latitude], zoom: 16.3, pitch: 60, duration: mapDuration });
+  }, [assistant?.mapFocus?.nonce, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Tap empty map -> fly in low and tilted (3D buildings show from ~z15) and ask the main agent.
   const onMapPress = (point: LatLng) => {
     setQuery("");
@@ -171,6 +183,8 @@ export default function Explore() {
             </Tap>
           ) : null}
         </View>
+        {/* The main agent (City Sense) sits right under the search box; it steps aside while searching. */}
+        {assistant?.avatarId && query.trim().length < 2 ? <AssistantBar anchor="top" /> : null}
         {/* Previous results stay up while the next search runs (the bar shows the spinner), so the panel
             doesn't blink on every pause in typing. It drops down from the bar once, when it first opens. */}
         {query.trim().length >= 2 && (results.length > 0 || !searching) && (

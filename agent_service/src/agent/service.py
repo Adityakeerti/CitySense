@@ -184,7 +184,8 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
     async def persist(*args, **kwargs):
         # args[4] is the final status of the turn
         return await persist_turn(*args, **kwargs, plan=finalize_plan(outcome.plan, args[4]),
-                                  tool_calls=outcome.tool_calls, action_data=outcome.action_data)
+                                  tool_calls=outcome.tool_calls, action_data=outcome.action_data,
+                                  client_actions=outcome.client_actions)
     if outcome.handled:
         served = "fallback" if outcome.tool_calls and all(c.served == "fallback" for c in outcome.tool_calls) else "live"
         return await persist(
@@ -204,7 +205,13 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
     hits = await retrieve(session, request.message, list(agent.tenants), limit=6)
     evidence = evidence_for(hits, agent.min_similarity, city)
     if evidence.abstain:
-        answer = (
+        from src.agent.composer import compose
+
+        composed = await compose(
+            intent="no_verified_info", message=request.message, language=language,
+            history=[{"role": m.role, "content": m.content} for m in reversed(recent)],
+        )
+        answer = composed or (
             "इस प्रश्न के लिए मेरे पास सत्यापित जानकारी नहीं है।"
             if language == "hi"
             else "I do not have verified information for that question."
@@ -264,8 +271,10 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
     )
     for step in range(3):
         try:
+            from src.agent.composer import system_prompt as composer_prompt
+
             generated = await generate_with_failover(
-                system=agent.system_prompt + directory_prompt,
+                system=composer_prompt("knowledge_answer", language, []) + "\n\n" + agent.system_prompt + directory_prompt,
                 user=request.message,
                 context=[h.text for h in hits],
                 language=language,
@@ -476,6 +485,7 @@ async def persist_turn(
     plan: list | None = None,
     tool_calls: list | None = None,
     action_data: dict | None = None,
+    client_actions: list | None = None,
 ) -> AgentResponse:
     sources = [
         h if isinstance(h, Source) else Source(
@@ -504,6 +514,7 @@ async def persist_turn(
         plan=plan,
         toolCalls=tool_calls,
         actionData=action_data,
+        clientActions=client_actions,
     )
     session.add(
         ChatMessage(
@@ -579,7 +590,9 @@ async def confirm_action(
                 or not secrets.compare_digest(args_hash(action.args), action.args_hash)
             ):
                 raise ValueError("Action authorization or integrity check failed")
-            result_data = await execute_complaint(action.args, token, principal.user_id)
+            from src.agent.media import photo_for
+
+            result_data = await execute_complaint(action.args, token, principal.user_id, await photo_for(session, token))
             action.status = "executed"
             action.result_ref = str(result_data["trackingId"])
             result = ConfirmResponse(status="executed", result=result_data)

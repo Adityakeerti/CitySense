@@ -360,3 +360,7 @@ canvas.heat { width: 100%; height: 220px; display: block; border-radius: 10px; i
 .ladder-track { position: relative; height: 12px; background: var(--panel-2); border-radius: 4px; }
 .ladder-bar { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
 .ladder-ci { position: absolute; top: 5px; height: 2px; background: var(--ink); }
+.rc-verdict-banner { border-radius: 10px; padding: 6px 10px; font-size: 11.5px; margin-bottom: 8px; }
+.rc-verdict-banner.conclusive { background: color-mix(in srgb, var(--good) 15%, transparent); }
+.rc-verdict-banner.tied { background: color-mix(in srgb, var(--warning) 22%, transparent); }
+.rc-verdict-banner.inconclusive { background: color-mix(in srgb, var(--critical) 13%, transparent); }

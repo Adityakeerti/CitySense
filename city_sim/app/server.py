@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from app.agents import build_graph, clock, make_llm, route_conditions
 from app import root_cause
 from app.config import ClusterConfig, load_config
+from app.population import generate_clusters
 
 BASE = Path(__file__).resolve().parent.parent
 cfg = load_config(os.environ.get("CITY_SIM_CONFIG", BASE / "config.yaml"))
@@ -49,11 +50,10 @@ class Runtime:
         self.rounds = 0
         self.ids = itertools.count(1)
         self.traces: deque[dict[str, Any]] = deque(maxlen=cfg.trace_log_size)
-        self.memory: dict[str, deque[dict[str, Any]]] = {c.id: deque(maxlen=cfg.memory_size) for c in cfg.clusters}
+        self.clusters: list[ClusterConfig] = []
+        self.memory: dict[str, deque[dict[str, Any]]] = {}
         self.last_plan: dict[str, dict[str, Any]] = {}
-        self.stats: dict[str, dict[str, Any]] = {
-            c.id: {"plans": 0, "llm": 0, "fallback": 0, "trips": 0, "vehicles": 0.0} for c in cfg.clusters
-        }
+        self.stats: dict[str, dict[str, Any]] = {}
         self.twin_ok = False
         self.llm_ok: bool | None = None
         self.last_error: str | None = None
@@ -83,6 +83,17 @@ def cluster_location(c: ClusterConfig) -> list[float] | None:
 WALK_CACHE = BASE / cfg.walk_cache_path
 
 
+def set_clusters() -> None:
+    """Explicit clusters from config, or a seeded random population over the twin's real geometry."""
+    if cfg.population and cfg.population.generate:
+        rt.clusters = generate_clusters(cfg.population, rt.topology)
+    else:
+        rt.clusters = list(cfg.clusters)
+    for c in rt.clusters:
+        rt.memory.setdefault(c.id, deque(maxlen=cfg.memory_size))
+        rt.stats.setdefault(c.id, {"plans": 0, "llm": 0, "fallback": 0, "trips": 0, "vehicles": 0.0})
+
+
 def _walk_key(c: ClusterConfig, start: list[float], end: list[float]) -> str:
     return f"{c.id}:{start[0]:.5f},{start[1]:.5f}->{end[0]:.5f},{end[1]:.5f}"
 
@@ -94,7 +105,7 @@ async def ensure_walk_paths() -> None:
         with contextlib.suppress(Exception):
             cache = json.loads(WALK_CACHE.read_text())
     changed = False
-    for c in cfg.clusters:
+    for c in rt.clusters:
         start = cluster_location(c)
         src = next((s for s in rt.topology["geometry"]["sources"] if s["id"] == c.source_id), None)
         if start is None or src is None:
@@ -187,7 +198,7 @@ async def run_round(state: dict[str, Any]) -> None:
             rt.memory[c.id].append({"plan_id": plan_id, "clock": obs["clock"], "episode": state["episode"], **{k: plan.get(k) for k in ("intent", "departure", "share")}})
 
     try:
-        await asyncio.gather(*(one(c) for c in cfg.clusters))
+        await asyncio.gather(*(one(c) for c in rt.clusters))
     finally:
         rt.round_running = False
 
@@ -197,6 +208,7 @@ async def loop() -> None:
         try:
             if rt.topology is None:
                 rt.topology = (await rt.client.get(f"{TWIN}/api/twin/topology", timeout=5)).json()
+                set_clusters()
                 await ensure_walk_paths()
             state = (await rt.client.get(f"{TWIN}/api/twin/state", timeout=5)).json()
             rt.twin_ok = True
@@ -257,8 +269,10 @@ async def clusters() -> dict[str, Any]:
                 "memory": list(rt.memory[c.id]),
                 "stats": rt.stats[c.id],
             }
-            for c in cfg.clusters
-        ]
+            for c in rt.clusters
+        ],
+        "generated": bool(cfg.population and cfg.population.generate),
+        "total_population": sum(c.population for c in rt.clusters),
     }
 
 

@@ -1,9 +1,10 @@
-import { Bell, Bot, BrainCircuit, Building2, LayoutGrid, MessageSquare, Moon, Search, Siren, Sun, Users } from "lucide-react";
+import { Bell, Bot, BrainCircuit, Building2, Landmark, LayoutGrid, MessageSquare, Moon, Search, Siren, Sun, Users } from "lucide-react";
 
 export const PAGES = [
   { id: "dashboard", label: "Dashboard", icon: LayoutGrid },
   { id: "policy", label: "Policy Lab", icon: BrainCircuit },
   { id: "residents", label: "Residents", icon: Users },
+  { id: "civic", label: "Civic Sim", icon: Landmark },
   { id: "townhall", label: "TownHall", icon: Building2 },
   { id: "tickets", label: "Tickets", icon: Siren },
   { id: "messages", label: "Messages", icon: MessageSquare },
@@ -24,7 +25,7 @@ export function Sidebar({ page, setPage }) {
       <div className="brand"><Logo /> CitySense</div>
       {PAGES.map(({ id, label, icon: Icon }, i) => (
         <span key={id} style={{ display: "contents" }}>
-          {i === 3 && <div className="nav-sep" />}
+          {i === 4 && <div className="nav-sep" />}
           <button className={`nav-btn${page === id ? " on" : ""}`} onClick={() => setPage(id)} aria-current={page === id ? "page" : undefined}>
             <Icon size={17} /> {label}
           </button>

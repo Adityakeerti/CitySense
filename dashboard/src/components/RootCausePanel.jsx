@@ -16,7 +16,7 @@ const CAUSE_LABEL = {
   signal_control: "Signal control",
   inconclusive: "Inconclusive",
 };
-const RUNG_LABEL = { restore_capacity: "Restore capacity at origin", demand_peak_shift: "Retime demand peak", rl_signal_control: "Best alternative signal policy" };
+const RUNG_LABEL = { restore_capacity: "Restore capacity at origin", demand_peak_shift: "Best demand intervention", rl_signal_control: "Best alternative signal policy" };
 const nice = (s) => String(s || "").replaceAll("_", " ");
 
 function Section({ title, children, defaultOpen = true, note }) {
@@ -83,7 +83,12 @@ export default function RootCausePanel({ rc, onClose }) {
       </div>
 
       {rc.status === "error" && <div className="explain-box err">{rc.error}</div>}
-      {d && !d.found && <div className="explain-box">{d.reason} Try a point that has been red for a while.</div>}
+      {d && !d.found && (
+        <div className="explain-box">
+          {d.reason}
+          {d.immature && <div className="muted" style={{ marginTop: 4 }}>Try again in about {fmt(d.retry_after_sec, 0)} simulated seconds (red ripples are traceable; orange ones are still maturing).</div>}
+        </div>
+      )}
 
       {d?.found && (
         <>
@@ -158,7 +163,8 @@ export default function RootCausePanel({ rc, onClose }) {
 
           <Section title="1 · Jam cluster" note="DBSCAN on noisy loop sensors">
             <div className="rc-kv num">
-              <span>cells</span><b>{d.jam.tail_cell} → {d.jam.head_cell} ({d.jam.cell_count} obs cells)</b>
+              <span>cells</span><b>{d.jam.tail_cell} → {d.jam.head_cell} ({d.jam.observation_count ?? d.jam.cell_count} congested observations)</b>
+              <span>confirmed for</span><b>{fmt(d.jam.age_sec, 0)} s</b>
               <span>extent</span><b>{fmt(d.jam.extent_m, 0)} m</b>
               <span>active</span><b>{simClock(d.jam.start_time_sec).full} – {simClock(d.jam.end_time_sec).full} ({fmt(d.jam.duration_sec, 0)} s)</b>
               <span>mean speed</span><b>{fmt(d.jam.mean_speed_mps, 1)} m/s</b>
@@ -169,8 +175,21 @@ export default function RootCausePanel({ rc, onClose }) {
             <div className="rc-kv num">
               <span>origin cell</span><b>{d.origin.cell}</b>
               <span>first congested</span><b>{simClock(d.origin.earliest_onset_sec).full}</b>
-              <span>backward wave</span><b>{fmt(d.origin.wave_speed_mps, 2)} m/s (theory {d.origin.theoretical_wave_speed_mps})</b>
+              <span>backward wave</span><b>{fmt(d.origin.wave_speed_mps, 2)} m/s {d.origin.wave_speed_is_fallback ? "(configured value: no reliable estimate, not evidence)" : `(theory ${d.origin.theoretical_wave_speed_mps})`}</b>
             </div>
+            {d.origin.candidates?.length > 1 && (
+              <table style={{ marginTop: 6 }}>
+                <thead><tr><th className="r">Candidate cell</th><th>Why considered</th><th className="r">Restore removes veh-h (95% CI)</th></tr></thead>
+                <tbody>
+                  {d.origin.candidates.map((c) => (
+                    <tr key={c.cell} style={{ fontWeight: c.cell === d.origin.cell ? 600 : 400 }}>
+                      <td className="r num">{c.cell}{c.cell === d.origin.cell ? " ◆" : ""}</td><td className="ink2">{c.kind}</td>
+                      <td className="r num">{fmt(c.mean_recovery_vhr, 2)} [{fmt(c.ci_lower_vhr, 2)}, {fmt(c.ci_upper_vhr, 2)}]</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             <table style={{ marginTop: 6 }}>
               <thead><tr><th className="r">Cell</th><th>Onset</th><th className="r">Speed m/s</th><th className="r">Flow veh/s</th></tr></thead>
               <tbody>
@@ -196,6 +215,11 @@ export default function RootCausePanel({ rc, onClose }) {
           </Section>
 
           <Section title="4 · Counterfactual ladder" note={`replay ${fmt(d.counterfactual.horizon_sec, 0)} s from ${simClock(d.counterfactual.snapshot_sec).full} · ${d.counterfactual.replicates} replicates`}>
+            {d.counterfactual.verdict && (
+              <div className={`rc-verdict-banner ${d.counterfactual.verdict.status}`}>
+                <b>{d.counterfactual.verdict.status === "conclusive" ? "Conclusive" : d.counterfactual.verdict.status === "tied" ? "Tied" : "Inconclusive"}</b> · {d.counterfactual.verdict.reason}
+              </div>
+            )}
             <LadderBars rungs={d.counterfactual.rungs} noise={d.counterfactual.noise_floor_vhr} />
             <table style={{ marginTop: 8 }}>
               <thead><tr><th>Signal policy instead of {POLICY_LABEL[d.counterfactual.running_policy]?.split(" (")[0]}</th><th className="r">Recovered veh-h (95% CI)</th></tr></thead>
@@ -205,6 +229,19 @@ export default function RootCausePanel({ rc, onClose }) {
                 ))}
               </tbody>
             </table>
+            {d.counterfactual.demand_alternatives && (
+              <table style={{ marginTop: 8 }}>
+                <thead><tr><th>Demand intervention</th><th className="r">Recovered veh-h (95% CI)</th></tr></thead>
+                <tbody>
+                  {d.counterfactual.demand_alternatives.map((x) => (
+                    <tr key={x.intervention}>
+                      <td>{x.intervention === "thin_trip_surge" ? `Thin trip surge${Object.keys(d.counterfactual.surge_sources_thinned || {}).length ? ` (entries ${Object.keys(d.counterfactual.surge_sources_thinned).join(", ")})` : " (no surge detected)"}` : "Retime background peak"}</td>
+                      <td className="r num">{fmt(x.mean_recovery_vhr, 2)} [{fmt(x.ci_lower_vhr, 2)}, {fmt(x.ci_upper_vhr, 2)}]</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             <ul className="rc-list muted" style={{ fontSize: 10.5 }}>{d.counterfactual.assumptions.map((x, i) => <li key={i}>{x}</li>)}</ul>
           </Section>
 

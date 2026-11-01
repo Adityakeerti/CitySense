@@ -115,6 +115,38 @@ class AreaArgs(ToolArgs):
     area: str = Field(default="", max_length=200)
 
 
+APP_SCREENS = ("explore", "townhall", "updates", "saved", "settings", "complaint_new", "complaint", "avatar")
+
+
+class NavigateArgs(ToolArgs):
+    screen: str = Field(pattern=r"^(explore|townhall|updates|saved|settings|complaint_new|complaint|avatar)$")
+    target_id: str | None = Field(default=None, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+    reason: str = Field(default="", max_length=200)
+
+
+class FocusMapArgs(ToolArgs):
+    query: str = Field(min_length=2, max_length=200)
+
+
+class AppPreferenceArgs(ToolArgs):
+    language: str | None = Field(default=None, pattern=r"^(en|hi)$")
+    voice_auto_play: bool | None = None
+
+
+class FindAgentArgs(ToolArgs):
+    name: str = Field(min_length=2, max_length=100)
+
+
+class BusinessArgs(ToolArgs):
+    area: str = Field(default="", max_length=200)
+    category: str | None = Field(default=None, max_length=40)
+    limit: int = Field(default=5, ge=1, le=10)
+
+
+class LimitArgs(ToolArgs):
+    limit: int = Field(default=5, ge=1, le=20)
+
+
 TOOL_MODELS = {
     "ask_clarification": ClarificationArgs,
     "create_complaint": ComplaintArgs,
@@ -149,6 +181,15 @@ TOOL_MODELS = {
     "get_ward_councillor_info": AreaArgs,
     "query_municipal_by_laws": QueryArgs,
     "get_waste_collection_route": AreaArgs,
+    "find_local_businesses": BusinessArgs,
+    # Main voice agent: in-app control (the client executes the returned actions)
+    "navigate_app": NavigateArgs,
+    "focus_map": FocusMapArgs,
+    "set_app_preference": AppPreferenceArgs,
+    "find_local_agent": FindAgentArgs,
+    # City pulse: more live feeds the app shows
+    "get_govt_notices": LimitArgs,
+    "get_city_incidents": LimitArgs,
 }
 
 READ_TOOL_NAMES = {
@@ -191,6 +232,13 @@ def tool_schemas(allowed: list[str]) -> list[dict]:
         "get_ward_councillor_info": "Ward/zone details and municipal helplines for an area.",
         "query_municipal_by_laws": "Answer questions on property tax, trade licences and municipal rules from the verified corpus.",
         "get_waste_collection_route": "Door-to-door waste collection rules and contacts for an area.",
+        "find_local_businesses": "Recommend popular local businesses (cafes, bakeries, shops…) near a place from the city directory.",
+        "navigate_app": "Open a screen in the citizen app (map, townhall, updates, saved, settings, a complaint, an avatar).",
+        "focus_map": "Fly the app's map to a named place in Dehradun.",
+        "set_app_preference": "Change the app language (en/hi) or turn spoken replies on/off.",
+        "find_local_agent": "Find a local area agent (map avatar) by name or place and open their chat.",
+        "get_govt_notices": "Latest government notices published to citizens.",
+        "get_city_incidents": "Recent city incidents visible to this citizen.",
     }
     return [
         {
@@ -486,19 +534,20 @@ async def read_tool(name: str, args: dict, user_id: str = "") -> dict:
         return {"served": "live", "data": result.json()}
 
 
-async def execute_complaint(args: dict, token: str, user_id: str = "") -> dict:
+async def execute_complaint(args: dict, token: str, user_id: str = "", photo: tuple | None = None) -> dict:
     ComplaintArgs.model_validate(args)
     if settings.complaint_service_url:
         # File into the complaint module (8001): worker assignment + SLA escalation ladder.
         from src.agent.integrations import complaint_create
 
-        item = await complaint_create(args, args.get("latitude"), args.get("longitude"))
+        item = await complaint_create(args, args.get("latitude"), args.get("longitude"), photo)
         return {
             "trackingId": item["tracking_id"],
             "status": item.get("status"),
             "category": item.get("category"),
             "assignedWorker": (item.get("assigned_worker") or {}).get("name"),
             "slaSeconds": item.get("sla_seconds"),
+            "photoAttached": bool(photo),
         }
     if settings.demo_mode or not settings.complaint_adapter_url:
         return {

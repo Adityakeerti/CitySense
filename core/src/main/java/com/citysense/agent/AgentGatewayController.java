@@ -64,6 +64,12 @@ public class AgentGatewayController {
         return responder.forwardAudio(file, language);
     }
 
+    @PostMapping("/assistant")
+    @Operation(summary = "Main agent for the in-app assistant: full hierarchy plus app control (clientActions)")
+    public ResponseEntity<byte[]> assistant(@RequestBody Map<String, Object> body) {
+        return responder.forwardJson(HttpMethod.POST, "/api/agent/assistant", body);
+    }
+
     @PostMapping("/place")
     @Operation(summary = "Main agent briefing for a tapped map point (or a follow-up question about it)")
     public ResponseEntity<byte[]> place(@RequestBody Map<String, Object> body) {
@@ -92,6 +98,18 @@ public class AgentGatewayController {
     @Operation(summary = "Confirm an action the agent proposed (e.g. file the drafted complaint)")
     public ResponseEntity<byte[]> confirm(@PathVariable String token) {
         return responder.forwardJson(HttpMethod.POST, "/api/agent/actions/{token}/confirm".replace("{token}", encode(token)), null);
+    }
+
+    @PostMapping(value = "/actions/{token}/photo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Attach a photo to a drafted complaint (stored by agent_service)")
+    public ResponseEntity<byte[]> attachPhoto(@PathVariable String token, @RequestPart("file") MultipartFile file) {
+        return responder.forwardMultipart("/api/agent/actions/" + encode(token) + "/photo", file, "evidence.jpg", null);
+    }
+
+    @GetMapping("/media/{mediaId}")
+    @Operation(summary = "A photo the caller attached")
+    public ResponseEntity<byte[]> media(@PathVariable String mediaId) {
+        return responder.forwardJson(HttpMethod.GET, "/api/agent/media/" + encode(mediaId), null);
     }
 
     @PostMapping("/actions/{token}/cancel")

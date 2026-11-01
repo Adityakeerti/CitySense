@@ -112,8 +112,11 @@ async def _main_agent_turn(request: Request, session: AsyncSession, principal: P
 
     if not getattr(request.app.state, "embedder_ready", False):
         raise HTTPException(503, "EMBEDDER_UNAVAILABLE: check /ready")
+    from src.agent.request_context import user_bearer
+
     meta: dict = {}
     token = events.turn_meta.set(meta)
+    bearer_token = user_bearer.set(request.headers.get("authorization"))
     started = _time.monotonic()
     try:
         async with asyncio.timeout(settings.request_timeout_seconds):
@@ -123,8 +126,39 @@ async def _main_agent_turn(request: Request, session: AsyncSession, principal: P
         raise HTTPException(504, "Request timed out; please retry") from exc
     finally:
         events.turn_meta.reset(token)
+        user_bearer.reset(bearer_token)
     _record_chat(request, principal, payload, response, meta, _time.monotonic() - started)
     return response
+
+
+class AssistantRequest(BaseModel):
+    """The main avatar (island) in the citizen app: talks to the main agent, which can also drive the app."""
+
+    model_config = {"extra": "forbid", "str_strip_whitespace": True}
+    message: str
+    sessionId: UUID | None = None
+    language: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    screen: str | None = None
+
+
+@router.post("/assistant", response_model=AgentResponse)
+async def assistant(payload: AssistantRequest, request: Request, session: Session, principal: User):
+    """Main agent for the in-app assistant island: full hierarchy + app control (clientActions)."""
+    from uuid import uuid4
+
+    from src.agent.schemas import ChatContext
+
+    check_rate_limit(principal.user_id)
+    if not payload.message or len(payload.message) > settings.max_message_length:
+        raise HTTPException(422, "Message must be 1-4000 characters")
+    chat_req = ChatRequest(
+        requestId=uuid4(), sessionId=payload.sessionId, message=payload.message,
+        language=payload.language if payload.language in ("hi", "en") else None,
+        context=ChatContext(latitude=payload.latitude, longitude=payload.longitude),
+    )
+    return await _main_agent_turn(request, session, principal, chat_req)
 
 
 @router.post("/local-chat", response_model=AgentResponse)
@@ -441,6 +475,30 @@ async def confirm(token: str, session: Session, principal: User, request: Reques
                   status=result.status, trackingId=(result.result or {}).get("trackingId"),
                   worker=(result.result or {}).get("assignedWorker"), detail=result.detail)
     return result
+
+
+@router.post("/actions/{token}/photo", status_code=201)
+async def attach_action_photo(
+    token: str, session: Session, principal: User, request: Request, file: Annotated[UploadFile, File()]
+):
+    """Attach a photo (stored in the database) to a drafted complaint before confirming it."""
+    from src.agent.media import MAX_BYTES, attach_photo
+
+    check_rate_limit(principal.user_id)
+    data = await file.read(MAX_BYTES + 1)
+    result = await attach_photo(session, principal, token, data)
+    events.record("photo", source=_source(request), user=events.short_user(principal.user_id),
+                  sizeBytes=result["sizeBytes"], contentType=result["contentType"])
+    return result
+
+
+@router.get("/media/{media_id}")
+async def get_media(media_id: UUID, session: Session, principal: User):
+    """A citizen's own uploaded photo."""
+    from src.agent.media import get_owned
+
+    media = await get_owned(session, principal, media_id)
+    return Response(content=media.data, media_type=media.content_type, headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/actions/{token}")

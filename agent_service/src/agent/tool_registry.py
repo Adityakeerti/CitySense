@@ -38,6 +38,11 @@ TOOL_OWNERS: dict[str, str] = {
     "handoff_to_officer": MAIN,
     "toggle_audio_preference": MAIN,
     "handoff": MAIN,  # legacy persona handoff used by the LLM tool loop
+    # App control: the main agent drives the citizen app (actions are executed by the client)
+    "navigate_app": MAIN,
+    "focus_map": MAIN,
+    "set_app_preference": MAIN,
+    "find_local_agent": MAIN,
     # Group B — civic grievances
     "create_complaint": COMPLAINT,
     "get_complaint_status": COMPLAINT,
@@ -59,11 +64,14 @@ TOOL_OWNERS: dict[str, str] = {
     "fetch_weather_inundation": PULSE,
     "get_air_quality_index": PULSE,
     "check_water_supply_schedule": PULSE,
+    "get_govt_notices": PULSE,
+    "get_city_incidents": PULSE,
     # Group E — municipal knowledge
     "search_schemes": KNOWLEDGE,
     "get_ward_councillor_info": KNOWLEDGE,
     "query_municipal_by_laws": KNOWLEDGE,
     "get_waste_collection_route": KNOWLEDGE,
+    "find_local_businesses": KNOWLEDGE,
 }
 
 assert set(TOOL_OWNERS) == set(TOOL_MODELS), "every tool needs exactly one owner and one schema"
@@ -335,9 +343,36 @@ async def _alerts(args: dict, user_id: str, ctx: dict) -> dict:
     return await read_tool("get_active_alerts", args, user_id)
 
 
+def _core_event_item(e: dict) -> dict | None:
+    """Core city_events row -> the briefing shape (date, time, location), in city time (IST)."""
+    from datetime import datetime, timedelta, timezone
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    try:
+        start = datetime.fromisoformat(str(e["startsAt"]).replace("Z", "+00:00")).astimezone(ist)
+        end = datetime.fromisoformat(str(e["endsAt"]).replace("Z", "+00:00")).astimezone(ist) if e.get("endsAt") else None
+    except (KeyError, ValueError):
+        return None
+    if (end or start).date() < datetime.now(ist).date():
+        return None  # already over
+    fmt = lambda d: f"{d.day} {d:%b %Y}"  # noqa: E731
+    date = f"{fmt(start)} to {fmt(end)}" if end and end.date() != start.date() else f"{start:%a} {fmt(start)}"
+    return {
+        "title": e.get("title") or "Event",
+        "date": date,
+        "time": "ongoing" if start.date() <= datetime.now(ist).date() else "all day",
+        "location": e.get("venue") or "Dehradun",
+        "description": e.get("description") or "",
+        "organizer": e.get("organizer"),
+        "source_url": e.get("sourceUrl"),
+        "starts_at": start.isoformat(),
+    }
+
+
 async def _events(args: dict, user_id: str, ctx: dict) -> dict:
     try:
-        items = await ix.core_city_events()
+        raw = await ix.core_city_events()
+        items = sorted(filter(None, (_core_event_item(e) for e in raw or [])), key=lambda i: i["starts_at"])
         if items:
             return {"served": "live", "items": items}
     except (ix.IntegrationUnavailable, LookupError):
@@ -411,6 +446,76 @@ async def _waste(args: dict, user_id: str, ctx: dict) -> dict:
             "passages": _corpus("solid waste collection door segregation", ctx.get("language", "en"), 1)}
 
 
+# ── App control (main agent) ─────────────────────────────────────────────────
+
+async def _navigate(args: dict, user_id: str, ctx: dict) -> dict:
+    action = {"type": "navigate", "screen": args["screen"]}
+    if args.get("target_id"):
+        action["id"] = args["target_id"]
+    return {"served": "live", "client_action": action}
+
+
+async def _focus_map(args: dict, user_id: str, ctx: dict) -> dict:
+    loc = await _verify_location({"query": args["query"]}, user_id, ctx)
+    data = loc.get("data", loc)
+    action = {"type": "focus_map", "latitude": data.get("lat"), "longitude": data.get("lng"),
+              "label": data.get("matched") or args["query"]}
+    return {"served": loc.get("served", "live"), "client_action": action, "precision": data.get("precision")}
+
+
+async def _set_preference(args: dict, user_id: str, ctx: dict) -> dict:
+    action: dict[str, Any] = {"type": "set_preference"}
+    if args.get("language"):
+        action["language"] = args["language"]
+    if args.get("voice_auto_play") is not None:
+        action["voiceAutoPlay"] = args["voice_auto_play"]
+        prefs = AUDIO_PREFERENCES.setdefault(user_id, {"preferred_speaker": "aditya"})
+        prefs.update(auto_play=args["voice_auto_play"], updated_at=_now())
+    return {"served": "live", "client_action": action}
+
+
+async def _find_local_agent(args: dict, user_id: str, ctx: dict) -> dict:
+    try:
+        found = await ix.core_find_avatars(args["name"], ctx.get("latitude"), ctx.get("longitude"))
+    except (ix.IntegrationUnavailable, LookupError) as exc:
+        return _fallback({"found": False}, str(exc))
+    if not found:
+        return {"served": "live", "found": False}
+    a = found[0]
+    return {"served": "live", "found": True, "avatar": {"id": a.get("id"), "name": a.get("name"), "title": a.get("title")},
+            "client_action": {"type": "navigate", "screen": "avatar", "id": a.get("id")}}
+
+
+# ── More city feeds (city pulse) ─────────────────────────────────────────────
+
+async def _notices(args: dict, user_id: str, ctx: dict) -> dict:
+    try:
+        rows = await ix.complaint_notices(args["limit"])
+        return {"served": "live", "items": rows[: args["limit"]]}
+    except (ix.IntegrationUnavailable, LookupError) as exc:
+        return _fallback({"items": []}, str(exc))
+
+
+async def _incidents(args: dict, user_id: str, ctx: dict) -> dict:
+    try:
+        rows = await ix.core_incidents()
+        return {"served": "live", "items": rows[: args["limit"]]}
+    except (ix.IntegrationUnavailable, LookupError) as exc:
+        return _fallback({"items": []}, str(exc))
+
+
+async def _businesses(args: dict, user_id: str, ctx: dict) -> dict:
+    lat, lng = ctx.get("latitude"), ctx.get("longitude")
+    found = ix.gazetteer_lookup(args.get("area") or "")
+    if found:  # a named place wins over the citizen's own position
+        lat, lng = found[1]["lat"], found[1]["lng"]
+    try:
+        rows = await ix.core_businesses(lat, lng, category=args.get("category"), limit=args["limit"])
+        return {"served": "live", "items": rows}
+    except (ix.IntegrationUnavailable, LookupError) as exc:
+        return _fallback({"items": []}, str(exc))
+
+
 HANDLERS: dict[str, Handler] = {
     "verify_citizen_location": _verify_location,
     "reverse_geocode_coordinates": _reverse_geocode,
@@ -440,6 +545,13 @@ HANDLERS: dict[str, Handler] = {
     "get_ward_councillor_info": _ward_info,
     "query_municipal_by_laws": _bylaws,
     "get_waste_collection_route": _waste,
+    "find_local_businesses": _businesses,
+    "navigate_app": _navigate,
+    "focus_map": _focus_map,
+    "set_app_preference": _set_preference,
+    "find_local_agent": _find_local_agent,
+    "get_govt_notices": _notices,
+    "get_city_incidents": _incidents,
 }
 
 assert set(HANDLERS) == set(TOOL_OWNERS), "every registered tool needs a handler"

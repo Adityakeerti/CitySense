@@ -3,6 +3,7 @@ import { Sidebar, Topbar } from "./components/Shell.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import PolicyLab from "./pages/PolicyLab.jsx";
 import Residents from "./pages/Residents.jsx";
+import Civic from "./pages/Civic.jsx";
 import { Messages, Tickets, TownHall } from "./pages/Services.jsx";
 import { useTwin } from "./lib/useTwin.js";
 import { usePoll } from "./lib/usePoll.js";
@@ -40,6 +41,7 @@ export default function App() {
   const missions = usePoll(() => getJSON("/api/emergency/missions"), 5000);
   const incidents = usePoll(() => getJSON("/api/emergency/incidents?limit=20"), 5000);
   const agent = usePoll(() => agentEvents(0), 4000);
+  const civic = usePoll(() => getJSON("/api/civic/health"), 5000);
 
   const city = { health: cityHealth.data, clusters: cityClusters.data, traces: cityTraces.data, error: cityHealth.error };
   const state = twin.state;
@@ -48,6 +50,7 @@ export default function App() {
     { name: "Gemma agents", state: cityHealth.data ? (cityHealth.data.llm_server ? "up" : "warn") : "down", detail: cityHealth.data ? `llama-server ${cityHealth.data.llm_server ? "online" : "offline"}` : cityHealth.error },
     { name: "Complaints", state: complaints.data ? "up" : "down", detail: complaints.error || "port 8001" },
     { name: "Emergency", state: missions.data ? "up" : "down", detail: missions.error || "port 8002" },
+    { name: "Civic sim", state: civic.data ? (civic.data.rl_loaded ? "up" : "warn") : "down", detail: civic.data ? `port 8005 · ${civic.data.policy} policy` : civic.error },
     { name: "Voice agent", state: agent.data ? "up" : "down", detail: agent.error || "port 8000" },
   ];
   const lastEventId = twin.events.at(-1)?.id || 0;
@@ -65,6 +68,7 @@ export default function App() {
           {page === "dashboard" && <Dashboard twin={twin} city={city} complaints={complaints.data?.complaints} incidents={recentIncidents} query={query} theme={effectiveTheme} />}
           {page === "policy" && <PolicyLab twin={twin} />}
           {page === "residents" && <Residents city={city} />}
+          {page === "civic" && <Civic theme={effectiveTheme} query={query} />}
           {page === "townhall" && <TownHall feed={complaints.data} error={complaints.error} />}
           {page === "tickets" && <Tickets missions={missions.data} incidents={incidents.data} error={missions.error} />}
           {page === "messages" && <Messages events={agent.data?.events} error={agent.error} />}

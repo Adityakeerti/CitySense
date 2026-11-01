@@ -15,7 +15,8 @@ async def seed() -> None:
                 tier="general",
                 display_name="City Sense",
                 system_prompt="Answer only from verified context.",
-                tenants=["public"],
+                # Municipal documents (Nagar Nigam rules, wards, property tax) are public civic information.
+                tenants=["public", "municipal"],
                 tools=[
                     "handoff",
                     "ask_clarification",
@@ -43,8 +44,12 @@ async def seed() -> None:
                 min_similarity=0.85,
             ),
         ]:
-            if not await session.get(AgentConfig, agent.agent_id):
+            existing = await session.get(AgentConfig, agent.agent_id)
+            if not existing:
                 session.add(agent)
+            elif not set(agent.tenants) <= set(existing.tenants):
+                # Widen an existing persona's document access; never narrow what an admin configured.
+                existing.tenants = sorted(set(existing.tenants) | set(agent.tenants))
         await session.commit()
         for tenant in ("public", "municipal"):
             folder = Path("data/corpus") / tenant

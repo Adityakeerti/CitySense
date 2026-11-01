@@ -169,6 +169,44 @@ class KnowledgeSpecialist(BaseSubAgent):
             metadata={"usable_count": len(usable), "top_title": best.title},
         )
 
+    async def recommend_businesses(
+        self, message: str, principal: Principal, language: str = "en", trace: Any = None,
+        latitude: float | None = None, longitude: float | None = None, area: str | None = None,
+    ) -> SubAgentResult:
+        """Popular local businesses from the city directory, nearest to the named place or the citizen."""
+        import re as _re
+
+        from src.agent.tool_registry import KNOWLEDGE, call_tool
+
+        m = _re.search(r"\b(cafe|caf\u00e9|coffee|bakery|bakeries|restaurant|food|eat|sweets?|mithai|book(?:s|store|shop)?|"
+                       r"shop(?:ping)?|market|clothes|outfitters?)\b", message, _re.I)
+        category = None
+        if m:
+            word = m.group(1).lower()
+            category = {"coffee": "cafe", "caf\u00e9": "cafe", "bakeries": "bakery", "food": None, "eat": None,
+                        "sweet": "sweets", "mithai": "sweets", "book": "bookstore", "books": "bookstore",
+                        "bookshop": "bookstore", "shop": "shopping", "market": "shopping", "clothes": "shopping",
+                        "outfitter": "shopping", "outfitters": "shopping"}.get(word, word)
+        res = await call_tool(KNOWLEDGE, "find_local_businesses", {"area": area or "", "category": category, "limit": 5},
+                              principal.user_id, trace, latitude=latitude, longitude=longitude)
+        items = res.get("items") or []
+        if not items and category:  # nothing in that category: show what is popular nearby instead
+            res = await call_tool(KNOWLEDGE, "find_local_businesses", {"area": area or "", "limit": 5},
+                                  principal.user_id, trace, latitude=latitude, longitude=longitude)
+            items = res.get("items") or []
+        hi = language == "hi"
+        if items:
+            lines = ["लोकप्रिय स्थानीय व्यवसाय:" if hi else "Popular local businesses:"]
+            for b in items:
+                dist = f" · {b['distanceMeters'] / 1000:.1f} km" if b.get("distanceMeters") is not None else ""
+                lines.append(f"- **{b['name']}** ({b['category']}, {b['locality']}{dist}) — {b['description']}")
+            text = "\n".join(lines)
+        else:
+            text = "निर्देशिका में अभी कोई व्यवसाय नहीं मिला।" if hi else "No businesses found in the city directory right now."
+        return SubAgentResult(status="ANSWERED", response_text=text, sources=[], cta="explore_businesses",
+                              execution_steps=["find_local_businesses"],
+                              metadata={"card": {"businesses": items}})
+
     async def area_brief(self, area: str, principal: Principal, trace: Any = None) -> list[str]:
         """Ward / zone facts and helplines for an area, from the verified corpus (this desk's own tool)."""
         from src.agent.tool_registry import KNOWLEDGE, call_tool

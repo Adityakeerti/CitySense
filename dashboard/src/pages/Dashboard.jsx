@@ -55,10 +55,13 @@ export default function Dashboard({ twin, city, complaints, incidents, query, th
   const autoTraced = useRef(false);
   useEffect(() => {
     if (autoTraced.current || !new URLSearchParams(location.search).get("trace")) return;
-    const w = [...(state?.congestion_points || [])].sort((x, y) => x.min_speed_ratio - y.min_speed_ratio)[0];
+    const w = [...(state?.congestion_points || [])].filter((p) => state.sim_time - p.since_sec >= (topology?.diagnosis_min_jam_age_sec ?? 0)).sort((x, y) => x.min_speed_ratio - y.min_speed_ratio)[0];
     if (w) { autoTraced.current = true; trace(w); }
   });
-  const worstPoint = () => [...(state?.congestion_points || [])].sort((x, y) => x.min_speed_ratio - y.min_speed_ratio)[0];
+  const minAge = topology?.diagnosis_min_jam_age_sec ?? 0;
+  const maturePoints = (state?.congestion_points || []).filter((p) => state.sim_time - p.since_sec >= minAge);
+  const worstPoint = () => [...maturePoints].sort((x, y) => x.min_speed_ratio - y.min_speed_ratio)[0]
+    || [...(state?.congestion_points || [])].sort((x, y) => x.min_speed_ratio - y.min_speed_ratio)[0];
 
   const k = state?.kpis || {};
   const active = k[state?.policy] || {};
@@ -104,7 +107,7 @@ export default function Dashboard({ twin, city, complaints, incidents, query, th
                     <div className="legend-row"><span className="legend-swatch" style={{ background: "#eceef0", height: 6 }} /> background traffic</div>
                     <div className="legend-row"><span style={{ width: 8, height: 8, borderRadius: 4, background: "#eb6834", border: "1.5px solid #fff" }} /> people walking to cars</div>
                     <div className="legend-row"><span className="legend-swatch" style={{ background: "linear-gradient(90deg,#16c85a 50%,#eb3737 50%)", height: 4 }} /> signal stop line</div>
-                    <div className="legend-row"><span style={{ width: 10, height: 10, borderRadius: 5, background: "#de1c1c", border: "2px solid #fff", boxShadow: "0 0 0 3px rgba(232,36,36,.35)" }} /> congestion point (click: root cause)</div>
+                    <div className="legend-row"><span style={{ width: 10, height: 10, borderRadius: 5, background: "#de1c1c", border: "2px solid #fff", boxShadow: "0 0 0 3px rgba(232,36,36,.35)" }} /> congestion point (red: traceable · orange: maturing)</div>
                   </div>
                 </>
               )}
@@ -148,7 +151,8 @@ export default function Dashboard({ twin, city, complaints, incidents, query, th
               </div>
             </Tile>
             <Tile on={!!rc} icon={SearchCheck} title="Diagnose root cause"
-              sub={(state.congestion_points || []).length ? `${state.congestion_points.length} congestion point(s) · trace the worst, or click a red ripple` : "no confirmed congestion right now"}
+              sub={maturePoints.length ? `${maturePoints.length} traceable congestion point(s) · trace the worst, or click a red ripple`
+                : (state.congestion_points || []).length ? `${state.congestion_points.length} jam(s) maturing (traceable after ${minAge} s)` : "no confirmed congestion right now"}
               onClick={() => { const w = worstPoint(); if (w) trace(w); }} />
             <Tile on={state.status === "running"} icon={state.status === "running" ? Activity : Pause} title="Simulation" sub={`${state.status} · ${fmt(state.steps_per_tick / topology.tick_interval_sec, 0)}× real time`} onClick={() => setMenu(menu === "sim" ? null : "sim")} open={menu === "sim"}>
               <div className="tile-menu">

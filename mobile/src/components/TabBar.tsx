@@ -38,10 +38,20 @@ function Tab({ item, active, onPress }: { item: TabItem; active: boolean; onPres
   // `on`: the selected pill grows out from the icon. `press`: a faint pill shows under the finger before release.
   const on = useRef(new Animated.Value(active ? 1 : 0)).current;
   const press = useRef(new Animated.Value(0)).current;
+  // The icon gives a small springy hop when its tab becomes active.
+  const hop = useRef(new Animated.Value(0)).current;
+  const { reduced } = useMotion();
 
   useEffect(() => {
     timing(on, active ? 1 : 0, { duration: duration.fast, curve: "move" }).start();
-  }, [active, on]);
+    if (active && !reduced) {
+      hop.setValue(0);
+      Animated.sequence([
+        Animated.timing(hop, { toValue: 1, duration: 120, useNativeDriver: true }),
+        Animated.spring(hop, { toValue: 0, friction: 4, tension: 160, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [active, on, hop, reduced]);
 
   const pillStyle = useMemo(
     () => ({ opacity: on, transform: [{ scaleX: on.interpolate({ inputRange: [0, 1], outputRange: [pillFrom, 1] }) }] }),
@@ -62,7 +72,16 @@ function Tab({ item, active, onPress }: { item: TabItem; active: boolean; onPres
       <View style={styles.pill}>
         <Animated.View style={[StyleSheet.absoluteFill, styles.pillPress, { opacity: press }]} />
         <Animated.View style={[StyleSheet.absoluteFill, styles.pillActive, pillStyle]} />
-        <Ionicons name={active ? item.iconActive : item.icon} size={20} color={active ? colors.tabActive : "#4A4A55"} />
+        <Animated.View
+          style={{
+            transform: [
+              { translateY: hop.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }) },
+              { scale: hop.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] }) },
+            ],
+          }}
+        >
+          <Ionicons name={active ? item.iconActive : item.icon} size={20} color={active ? colors.tabActive : "#4A4A55"} />
+        </Animated.View>
       </View>
       <Text style={[styles.label, active && styles.labelActive]}>{item.label}</Text>
     </Tap>

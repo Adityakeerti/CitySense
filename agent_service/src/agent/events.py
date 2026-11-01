@@ -53,6 +53,13 @@ TOOL_SERVICE: dict[str, str] = {
     "get_ward_councillor_info": "knowledge_corpus",
     "query_municipal_by_laws": "knowledge_corpus",
     "get_waste_collection_route": "knowledge_corpus",
+    "find_local_businesses": "core",
+    "navigate_app": "app",
+    "focus_map": "app",
+    "set_app_preference": "app",
+    "find_local_agent": "core",
+    "get_govt_notices": "complaint_module",
+    "get_city_incidents": "core",
 }
 
 

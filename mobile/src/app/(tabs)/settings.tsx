@@ -3,12 +3,16 @@ import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Animated, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useAssistant } from "../../assistant/AssistantContext";
+import { AvatarChooser, BobbingAvatar } from "../../assistant/AssistantLayer";
 import { useAuth } from "../../auth/AuthContext";
+import { mainAvatarById } from "../../content/mainAvatars";
 import { Card } from "../../components/Card";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { config } from "../../config";
 import { images } from "../../content/onboarding";
 import { duration, timing, useReducedMotion } from "../../motion";
+import { FadeIn } from "../../motion/FadeIn";
 import { Tap } from "../../motion/Tap";
 import { colors, fonts, radius } from "../../theme";
 
@@ -20,7 +24,10 @@ const LANGUAGES = [
 
 export default function Settings() {
   const { user, language, setLanguage, signOut } = useAuth();
+  const { avatarId, chooseAvatar } = useAssistant();
+  const [choosing, setChoosing] = useState(false);
   if (!user) return null;
+  const guide = mainAvatarById(avatarId);
 
   const logout = () =>
     Alert.alert("Log out?", "You'll need to sign in again.", [
@@ -39,6 +46,7 @@ export default function Settings() {
     <View style={styles.fill}>
       <ScreenHeader title="Settings" />
       <ScrollView contentContainerStyle={styles.content}>
+        <FadeIn index={0}>
         <Card style={styles.profile}>
           <Image source={images.faceBoy} style={styles.photo} contentFit="cover" />
           <View style={{ flex: 1 }}>
@@ -57,6 +65,19 @@ export default function Settings() {
             </View>
           </View>
         </Card>
+        </FadeIn>
+
+        <Text style={styles.section}>City Sense guide</Text>
+        <FadeIn index={1}>
+        <Tap style={styles.guideRow} onPress={() => setChoosing(true)} accessibilityLabel={`City Sense guide: ${guide.name}. Change`}>
+          <BobbingAvatar avatar={guide} size={44} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.name}>{guide.name}</Text>
+            <Text style={styles.email}>{guide.tagline}</Text>
+          </View>
+          <Text style={styles.guideChange}>Change</Text>
+        </Tap>
+        </FadeIn>
 
         <Text style={styles.section}>Chat language</Text>
         <Segmented options={LANGUAGES} value={language} onChange={setLanguage} />
@@ -64,7 +85,7 @@ export default function Settings() {
         <Text style={styles.section}>About</Text>
         <Card style={{ padding: 0 }}>
           <Row icon="server-outline" label="Server" value={config.apiBaseUrl} />
-          <Row icon="map-outline" label="Map data" value="© OpenStreetMap contributors" />
+          <Row icon="map-outline" label="Map data" value="© OpenStreetMap contributors · OpenFreeMap" />
         </Card>
 
         <Tap style={styles.logout} onPress={logout} accessibilityLabel="Log out">
@@ -72,6 +93,15 @@ export default function Settings() {
           <Text style={styles.logoutText}>Log out</Text>
         </Tap>
       </ScrollView>
+      {choosing ? (
+        <AvatarChooser
+          onChoose={(id) => {
+            void chooseAvatar(id);
+            setChoosing(false);
+          }}
+          onCancel={() => setChoosing(false)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -132,6 +162,17 @@ function Row({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; lab
 const SEG_PAD = 4;
 
 const styles = StyleSheet.create({
+  guideRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  guideChange: { fontFamily: fonts.bold, fontSize: 13, color: colors.accentBlue },
   fill: { flex: 1, backgroundColor: colors.surface },
   content: { paddingHorizontal: 20, paddingBottom: 40, gap: 12 },
   profile: { flexDirection: "row", alignItems: "center", gap: 16 },

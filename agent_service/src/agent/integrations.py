@@ -53,7 +53,9 @@ async def complaint_list() -> list[dict[str, Any]]:
     return await _request("GET", settings.complaint_service_url, "/api/complaints")
 
 
-async def complaint_create(args: dict[str, Any], lat: float | None, lng: float | None) -> dict[str, Any]:
+async def complaint_create(
+    args: dict[str, Any], lat: float | None, lng: float | None, photo: tuple[bytes, str, str] | None = None
+) -> dict[str, Any]:
     form = {
         "title": f"{args['category']} at {args['location']}"[:200],
         "description": args["description"],
@@ -62,7 +64,8 @@ async def complaint_create(args: dict[str, Any], lat: float | None, lng: float |
     }
     if lat is not None and lng is not None:
         form.update(lat=str(lat), lng=str(lng))
-    return await _request("POST", settings.complaint_service_url, "/api/complaints", data=form)
+    files = {"photo": (photo[2], photo[0], photo[1])} if photo else None
+    return await _request("POST", settings.complaint_service_url, "/api/complaints", data=form, files=files)
 
 
 async def complaint_escalate(tracking_id: str) -> dict[str, Any]:
@@ -114,6 +117,49 @@ async def emergency_weather(lat: float | None = None, lng: float | None = None) 
 
 async def core_city_events() -> list[dict[str, Any]]:
     return await _request("GET", settings.core_service_url, "/api/city-events")
+
+
+def _citizen_auth() -> dict[str, str]:
+    from src.agent.request_context import user_bearer
+
+    bearer = user_bearer.get()
+    if not bearer:
+        raise IntegrationUnavailable("no citizen token for core")
+    return {"Authorization": bearer}
+
+
+async def core_incidents() -> list[dict[str, Any]]:
+    """Incidents visible to this citizen (core enforces what they may see)."""
+    return await _request("GET", settings.core_service_url, "/api/incidents", headers=_citizen_auth())
+
+
+async def core_find_avatars(query: str, lat: float | None, lng: float | None) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {"q": query}
+    if lat is not None and lng is not None:
+        params.update(lat=lat, lng=lng, radiusMeters=50000)
+    return await _request("GET", settings.core_service_url, "/api/avatars", params=params, headers=_citizen_auth())
+
+
+async def core_businesses(
+    lat: float | None, lng: float | None, *, radius_m: float | None = None, category: str | None = None,
+    query: str | None = None, limit: int = 6,
+) -> list[dict[str, Any]]:
+    """Popular local businesses from core's city directory (public, nearest first)."""
+    params: dict[str, Any] = {"limit": limit}
+    if lat is not None and lng is not None:
+        params.update(lat=lat, lng=lng)
+        if radius_m:
+            params["radiusMeters"] = radius_m
+    if category:
+        params["category"] = category
+    if query:
+        params["q"] = query
+    return await _request("GET", settings.core_service_url, "/api/businesses", params=params)
+
+
+async def complaint_notices(limit: int) -> list[dict[str, Any]]:
+    """Government notices published to the complaint module (read side is public)."""
+    return await _request("GET", settings.complaint_service_url, "/api/notices", params={"limit": limit})
 
 
 # ── Public data APIs (opt-in) ────────────────────────────────────────────────
@@ -168,11 +214,16 @@ GAZETTEER: dict[str, dict[str, Any]] = {
     "dalanwala": {"lat": 30.3180, "lng": 78.0600, "zone": "Zone 2 (North)", "aliases": []},
     "karanpur": {"lat": 30.3290, "lng": 78.0520, "zone": "Zone 2 (North)", "aliases": []},
     "patel nagar": {"lat": 30.3030, "lng": 78.0220, "zone": "Zone 3 (South)", "aliases": []},
-    "clement town": {"lat": 30.2690, "lng": 78.0090, "zone": "Zone 3 (South)", "aliases": []},
-    "majra": {"lat": 30.2940, "lng": 78.0170, "zone": "Zone 3 (South)", "aliases": []},
+    "clement town": {"lat": 30.26133, "lng": 78.01201, "zone": "Zone 3 (South)", "aliases": []},
+    "majra": {"lat": 30.29300, "lng": 78.00264, "zone": "Zone 3 (South)", "aliases": []},
     "dharampur": {"lat": 30.3000, "lng": 78.0500, "zone": "Zone 4 (Trans-Rispana)", "aliases": []},
     "nehru colony": {"lat": 30.2960, "lng": 78.0570, "zone": "Zone 4 (Trans-Rispana)", "aliases": []},
-    "isbt": {"lat": 30.2876, "lng": 77.9989, "zone": None, "aliases": ["bus stand"]},
+    "isbt": {"lat": 30.28791, "lng": 77.99803, "zone": "Zone 3 (South)", "aliases": ["bus stand"]},  # in Majra (OSM)
+    # Points around Clement Town / Bell Road from OpenStreetMap Nominatim (2026-11-01).
+    "kargi chowk": {"lat": 30.28837, "lng": 78.02394, "zone": "Zone 3 (South)", "aliases": ["kargi"]},
+    "graphic era": {"lat": 30.26802, "lng": 77.99612, "zone": None, "aliases": ["bell road"]},
+    "mindrolling monastery": {"lat": 30.26182, "lng": 77.99732, "zone": None, "aliases": ["mindrolling", "great stupa"]},
+    "mohabbewala": {"lat": 30.27097, "lng": 77.98265, "zone": None, "aliases": []},
     "prem nagar": {"lat": 30.3340, "lng": 77.9600, "zone": None, "aliases": []},
     "sahastradhara road": {"lat": 30.3400, "lng": 78.0800, "zone": None, "aliases": []},
     "ballupur": {"lat": 30.3350, "lng": 78.0100, "zone": None, "aliases": []},

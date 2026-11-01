@@ -39,52 +39,27 @@ departure_window_sec:
   delay_short: [120, 240]
   delay_long: [300, 600]
 
-clusters:
-  - id: rajpur
-    name: Rajpur Road office workers
-    persona: salaried office workers who must reach downtown offices by 9:30
-    population: 900
-    source_id: 0
-    offset_m: [-260, 140]
-  - id: clement
-    name: Clement Town students
-    persona: university students with flexible class times who prefer to avoid traffic
-    population: 700
-    source_id: 0
-    offset_m: [-300, -150]
-  - id: prem
-    name: Prem Nagar traders
-    persona: shopkeepers opening stores and moving delivery goods to the market
-    population: 500
-    source_id: 0
-    offset_m: [-420, 10]
-  - id: doon
-    name: Doon Hospital staff
-    persona: nurses and doctors on a shift change who cannot delay
-    population: 350
-    source_id: 1
-    offset_m: [0, 260]
-  - id: paltan
-    name: Paltan Bazaar shoppers
-    persona: families running errands and shopping, flexible about timing
-    population: 600
-    source_id: 2
-    offset_m: [0, -260]
-  - id: ballupur
-    name: Ballupur school run
-    persona: parents dropping children at school before 8:00
-    population: 450
-    source_id: 3
-    offset_m: [0, 260]
-  - id: isbt
-    name: ISBT commuters
-    persona: inter-city bus passengers and taxi drivers heading to the bus terminal
-    population: 400
-    source_id: 4
-    offset_m: [0, -260]
-  - id: sahastra
-    name: Sahastradhara leisure
-    persona: retirees and tourists going out for leisure trips, highly flexible
-    population: 300
-    source_id: 5
-    offset_m: [0, 260]
+# Randomised population over the locality around the twin's real streets (app/population.py).
+population:
+  generate: true
+  seed: 11
+  clusters: 28
+  total_population: 24000
+  size_sigma: 0.9            # lognormal: a few large neighbourhoods, many small ones
+  min_population: 40
+  spread_m: 420
+  min_road_distance_m: 45
+  min_spacing_m: 110
+  names: [Dalanwala, Karanpur, Hathibarkala, Rajpur Village, Jakhan, Dilaram Bazaar, Salawala, Kishanpur,
+          Chukkuwala, Ajabpur, Survey Chowk, Aradhghar, Nehru Colony, Raipur, Vijay Colony, Malsi,
+          Sahastradhara Road, Ballupur, Indira Nagar, Vasant Vihar, Nashville Road, Old Survey Road,
+          Mussoorie Diversion, Kanwali, Bindal, Khurbura, Govind Nagar, Tilak Road, Lakhibagh, Tyagi Road]
+  personas:
+    - {text: "salaried office workers who must reach downtown offices by 9:30", weight: 3}
+    - {text: "university and school students with flexible class times who avoid traffic", weight: 2}
+    - {text: "shopkeepers opening stores and moving delivery goods to the market", weight: 2}
+    - {text: "hospital and essential-service staff on a shift change who cannot delay", weight: 1}
+    - {text: "families running errands and shopping, flexible about timing", weight: 2}
+    - {text: "parents doing the school run before 8:00", weight: 2}
+    - {text: "retirees and tourists going out for leisure, highly flexible", weight: 1}
+    - {text: "taxi and auto-rickshaw drivers working the corridor all morning", weight: 1}

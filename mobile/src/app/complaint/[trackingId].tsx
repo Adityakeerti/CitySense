@@ -1,3 +1,4 @@
+import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -10,6 +11,7 @@ import { Card } from "../../components/Card";
 import { ErrorBanner, Loading } from "../../components/StateViews";
 import { StatusBadge } from "../../components/StatusBadge";
 import { FadeIn } from "../../motion/FadeIn";
+import { config } from "../../config";
 import { colors, fonts } from "../../theme";
 import { timeAgo } from "../../utils/geo";
 
@@ -59,6 +61,15 @@ export default function TrackComplaint() {
               <StatusBadge value={complaint.status} />
               <Text style={styles.title}>{complaint.title}</Text>
               <Text style={styles.body}>{complaint.description}</Text>
+              {complaint.photoUrl ? (
+                <Image
+                  source={{ uri: `${config.complaintServiceUrl}${complaint.photoUrl}` }}
+                  style={{ width: "100%", aspectRatio: 4 / 3, borderRadius: 12, backgroundColor: colors.surfaceAlt, marginVertical: 4 }}
+                  contentFit="cover"
+                  transition={250}
+                  accessibilityLabel="Photo attached to this complaint"
+                />
+              ) : null}
               <Text style={styles.meta}>
                 {complaint.department.replace(/_/g, " ")} · {complaint.priority.toLowerCase()} priority · filed {timeAgo(complaint.createdAt)}
               </Text>

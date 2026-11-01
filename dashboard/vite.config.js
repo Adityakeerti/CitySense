@@ -9,6 +9,7 @@ const CITY = env("CITY_SIM_URL", "http://127.0.0.1:8004");
 const AGENT = env("AGENT_URL", "http://127.0.0.1:8000");
 const COMPLAINTS = env("COMPLAINT_URL", "http://127.0.0.1:8001");
 const EMERGENCY = env("EMERGENCY_URL", "http://127.0.0.1:8002");
+const CIVIC = env("CIVIC_SIM_URL", "http://127.0.0.1:8005");
 
 export default defineConfig({
   plugins: [react()],
@@ -17,6 +18,7 @@ export default defineConfig({
     proxy: {
       "/api/twin": { target: TWIN, ws: true, changeOrigin: true },
       "/api/city": { target: CITY, changeOrigin: true },
+      "/api/civic": { target: CIVIC, changeOrigin: true },
       "/api/complaint-flow": {
         target: COMPLAINTS,
         changeOrigin: true,

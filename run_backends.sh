@@ -4,6 +4,7 @@
 #   8003 live digital twin + RL (CITY SENSE RL repo, its own .venv)
 #   8090 llama-server with Gemma-4-E2B (local LLM for the population agents)
 #   8004 population simulator (LangGraph people-cluster agents, SmartCity/.venv)
+#   8005 civic simulator (residents -> complaint portal -> municipal/police agents, RL root-cause policy)
 #   5173 React operations dashboard (Vite dev server)
 # Paths can be overridden: RL_DIR, LLAMA_SERVER, GEMMA_MODEL, LLAMA_ARGS.
 set -e
@@ -89,6 +90,15 @@ case "$ACTION" in
       (cd "$DIR/city_sim" && nohup "$VENV_UVICORN" app.server:app --host 127.0.0.1 --port 8004 > "$DIR/city_sim/service.log" 2>&1 &) </dev/null >/dev/null 2>&1
     fi
 
+    # 6b. Civic simulator (complaints, departments, RL investigation policy) on Port 8005
+    if listening 8005; then
+      echo "[-] Port 8005 (Civic Simulator) already listening."
+    else
+      echo "[+] Starting Civic Simulator on port 8005..."
+      (cd "$DIR/civic_sim" && COMPLAINT_SERVICE_URL="${COMPLAINT_SERVICE_URL:-http://localhost:8001}" \
+        nohup "$VENV_UVICORN" app.server:app --host 127.0.0.1 --port 8005 > "$DIR/civic_sim/service.log" 2>&1 &) </dev/null >/dev/null 2>&1
+    fi
+
     # 7. Dashboard dev server on Port 5173
     if listening 5173; then
       echo "[-] Port 5173 (Dashboard) already listening."
@@ -104,8 +114,8 @@ case "$ACTION" in
     ;;
 
   stop)
-    echo "Stopping CitySense stack on ports 8000-8004, 8090, 5173..."
-    for p in 8000 8001 8002 8003 8004 8090 5173; do fuser -k "$p/tcp" 2>/dev/null || true; done
+    echo "Stopping CitySense stack on ports 8000-8005, 8090, 5173..."
+    for p in 8000 8001 8002 8003 8004 8005 8090 5173; do fuser -k "$p/tcp" 2>/dev/null || true; done
     echo "All stopped."
     ;;
 
@@ -130,6 +140,9 @@ case "$ACTION" in
 
     echo -n "• Population Simulator (Port 8004): "
     if curl -s http://localhost:8004/api/city/health | grep -q '"status":"ok"'; then echo "ONLINE"; else echo "OFFLINE"; fi
+
+    echo -n "• Civic Simulator (Port 8005): "
+    if curl -s http://localhost:8005/api/civic/health | grep -q '"ok":true'; then echo "ONLINE"; else echo "OFFLINE"; fi
 
     echo -n "• Dashboard (Port 5173): "
     if curl -s -o /dev/null -w '%{http_code}' http://localhost:5173/ | grep -q 200; then echo "ONLINE  → http://localhost:5173"; else echo "OFFLINE"; fi

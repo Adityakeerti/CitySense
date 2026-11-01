@@ -293,8 +293,7 @@ class TestComplaintModule(unittest.TestCase):
     def test_12_notices_publish_list_revoke(self):
         """Portal publishes a notice, the feed lists it newest-first, and it can be revoked."""
         from app import notices as notices_mod
-        if os.path.exists(notices_mod.NOTICES_FILE):
-            os.remove(notices_mod.NOTICES_FILE)
+        notices_mod._save([])
 
         first = self.client.post("/api/notices", json={"title": "Water supply shutdown", "department": "Jal Sansthan"}, headers=OPERATOR)
         self.assertEqual(first.status_code, 201, first.text)
@@ -315,8 +314,7 @@ class TestComplaintModule(unittest.TestCase):
     def test_13_notices_validation_and_expiry(self):
         """Bad input is rejected; expired notices drop out of the feed unless asked for."""
         from app import notices as notices_mod
-        if os.path.exists(notices_mod.NOTICES_FILE):
-            os.remove(notices_mod.NOTICES_FILE)
+        notices_mod._save([])
 
         self.assertEqual(self.client.post("/api/notices", json={"title": "x", "department": "PWD"}, headers=OPERATOR).status_code, 422)
         self.assertEqual(self.client.post("/api/notices", json={

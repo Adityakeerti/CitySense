@@ -83,6 +83,8 @@ export interface PendingAgentAction {
   summary: string;
   expiresAt: string;
   action_type?: string;
+  /** A photo would help the field crew (sewage, garbage, potholes…). */
+  photoSuggested?: boolean;
 }
 
 export interface AvatarChatResponse {
@@ -107,7 +109,15 @@ export interface AgentReply {
   sources?: { title: string; url?: string | null }[];
   actionData?: Record<string, any> | null;
   pendingAction?: PendingAgentAction | null;
+  /** Instructions from the main agent for the app: navigate, focus_map, set_preference. */
+  clientActions?: ClientAction[] | null;
+  toolCalls?: { tool: string; caller: string; served: string }[] | null;
 }
+
+export type ClientAction =
+  | { type: "navigate"; screen: string; id?: string }
+  | { type: "focus_map"; latitude: number; longitude: number; label?: string }
+  | { type: "set_preference"; language?: "hi" | "en"; voiceAutoPlay?: boolean };
 
 export interface ConfirmResult {
   status: "executed" | "failed" | "rejected" | "cancelled";
@@ -144,6 +154,8 @@ export interface Complaint {
   resolvedAt?: string;
   createdAt: string;
   updatedAt: string;
+  /** Evidence photo path on the complaint module (e.g. /photos/photo_ab12.jpg). */
+  photoUrl?: string;
 }
 
 export interface CityEvent {
@@ -157,6 +169,25 @@ export interface CityEvent {
   startsAt: string;
   endsAt?: string;
   createdAt: string;
+  venue?: string | null;
+  organizer?: string | null;
+  /** Where the listing came from (organiser page, ticketing site, holiday list). */
+  sourceUrl?: string | null;
+}
+
+/** A popular local business (curated directory in core; agents recommend from the same list). */
+export interface Business {
+  id: string;
+  name: string;
+  category: string;
+  locality: string;
+  description: string;
+  latitude: number;
+  longitude: number;
+  /** "approximate" = locality/junction centre, not the shop door. */
+  coordsPrecision: "exact" | "approximate";
+  sourceUrl?: string | null;
+  distanceMeters?: number | null;
 }
 
 export interface Incident {
@@ -203,4 +234,39 @@ export interface Notice {
 export interface ComplaintMeta {
   statuses: string[];
   escalationLadder: string[];
+}
+
+/** Live city weather from core (Open-Meteo + flood-depth estimate). */
+export interface CityWeather {
+  city: string;
+  latitude: number;
+  longitude: number;
+  temperatureC: number;
+  relativeHumidity: number;
+  precipitationMm: number;
+  rainMm: number;
+  floodDepthCm: number;
+  riskLevel: string;
+  conditionText: string;
+  source: string;
+  observedAt: string;
+}
+
+/** Open-Meteo forecast (public, keyless), Asia/Kolkata times. */
+export interface WeatherForecast {
+  current: { temperature_2m: number; apparent_temperature: number; weather_code: number; wind_speed_10m: number; relative_humidity_2m: number };
+  hourly: { time: string[]; temperature_2m: number[]; weather_code: number[]; precipitation_probability: number[] };
+  daily: {
+    time: string[];
+    weather_code: number[];
+    temperature_2m_max: number[];
+    temperature_2m_min: number[];
+    precipitation_probability_max: number[];
+    sunrise: string[];
+    sunset: string[];
+  };
+}
+
+export interface AirQuality {
+  current: { us_aqi: number; pm2_5: number; pm10: number };
 }

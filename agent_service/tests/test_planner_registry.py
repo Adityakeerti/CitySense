@@ -30,15 +30,16 @@ from src.config import settings
 planner = VoiceAgentPlanner()
 
 
-def test_catalog_has_27_tools_plus_legacy_handoff_each_with_one_owner():
+def test_catalog_every_tool_has_exactly_one_owner():
     assert set(TOOL_OWNERS) == set(TOOL_MODELS) == set(HANDLERS)
-    assert len(TOOL_OWNERS) == 28
+    assert len(TOOL_OWNERS) == 35  # 27 planned + legacy handoff + 4 app-control + 2 city feeds + directory
     assert tools_owned_by(MAIN) == sorted([
         "ask_clarification", "handoff", "handoff_to_officer", "reverse_geocode_coordinates",
         "toggle_audio_preference", "verify_citizen_location",
+        "navigate_app", "focus_map", "set_app_preference", "find_local_agent",
     ])
     assert len(tools_owned_by(EMERGENCY)) == 6 and len(tools_owned_by(COMPLAINT)) == 6
-    assert len(tools_owned_by(PULSE)) == 6 and len(tools_owned_by(KNOWLEDGE)) == 4
+    assert len(tools_owned_by(PULSE)) == 8 and len(tools_owned_by(KNOWLEDGE)) == 5
 
 
 async def test_main_agent_cannot_call_domain_tools():
@@ -104,7 +105,7 @@ async def test_end_to_end_emergency_turn_respects_delegation():
 async def test_complaint_confirm_files_into_complaint_service(monkeypatch):
     monkeypatch.setattr(settings, "complaint_service_url", "http://complaint-module:8001")
 
-    async def fake_create(args, lat, lng):
+    async def fake_create(args, lat, lng, photo=None):
         assert args["category"] == "Potholes and Road Damage"
         return {"tracking_id": "CMP-2026-ABC123", "status": "WORKER_ASSIGNED", "assigned_worker": {"name": "R"}}
 

@@ -5,6 +5,7 @@ import tempfile
 import threading
 import uuid
 from typing import List, Dict, Any, Optional
+from . import pg_store
 from .models import Complaint, AuthorityModel, CitizenModel, WorkerModel
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,6 +33,12 @@ _WRITE_LOCK = threading.RLock()
 class DataStore:
     def __init__(self):
         self._ensure_files()
+        if pg_store.enabled():
+            # Shared CitySense database (schema civic_flow); first start imports the JSON data.
+            notices_file = os.path.join(STATE_DIR, "notices.json")
+            seed_notices = json.load(open(notices_file, encoding="utf-8")) if os.path.exists(notices_file) else []
+            pg_store.init([c.model_dump() for c in self._load_json()], seed_notices)
+            print("[Storage] complaints and notices stored in Postgres (civic_flow)")
 
     def _ensure_files(self):
         if not os.path.exists(COMPLAINTS_FILE):
@@ -63,6 +70,11 @@ class DataStore:
             return json.load(f)
 
     def load_complaints(self) -> List[Complaint]:
+        if pg_store.enabled():
+            return [Complaint(**d) for d in pg_store.list_complaints()]
+        return self._load_json()
+
+    def _load_json(self) -> List[Complaint]:
         if not os.path.exists(COMPLAINTS_FILE):
             return []
         try:
@@ -73,6 +85,9 @@ class DataStore:
             return []
 
     def save_complaints(self, complaints: List[Complaint]):
+        if pg_store.enabled():
+            pg_store.replace_complaints([c.model_dump() for c in complaints])
+            return
         # Atomic replace so a crash mid-write never leaves a truncated JSON file.
         with _WRITE_LOCK:
             fd, tmp = tempfile.mkstemp(dir=os.path.dirname(COMPLAINTS_FILE), suffix=".tmp")
@@ -81,12 +96,18 @@ class DataStore:
             os.replace(tmp, COMPLAINTS_FILE)
 
     def get_complaint(self, tracking_id: str) -> Optional[Complaint]:
+        if pg_store.enabled():
+            found = pg_store.get_complaint(tracking_id)
+            return Complaint(**found) if found else None
         for c in self.load_complaints():
             if c.tracking_id.lower() == tracking_id.lower():
                 return c
         return None
 
     def upsert_complaint(self, complaint: Complaint):
+        if pg_store.enabled():
+            pg_store.upsert_complaint(complaint.model_dump())
+            return
         with _WRITE_LOCK:
             self._upsert(complaint)
 

@@ -43,6 +43,41 @@ public class CityEvent {
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
+    @Column(length = 200)
+    private String venue;
+
+    @Column(length = 200)
+    private String organizer;
+
+    @Column(name = "source_url", columnDefinition = "TEXT")
+    private String sourceUrl;
+
+    @Column(name = "seed_key", unique = true, length = 80)
+    private String seedKey;
+
+    /** Upsert a real-world event loaded by the directory seeder. */
+    public void applySeed(String seedKey, String title, String description, String category, double latitude,
+                          double longitude, Instant startsAt, Instant endsAt, String venue, String organizer,
+                          String sourceUrl) {
+        this.seedKey = seedKey;
+        this.title = title;
+        this.description = description;
+        this.category = category == null ? "COMMUNITY" : category.toUpperCase(java.util.Locale.ROOT);
+        this.severity = "INFO";
+        this.latitude = latitude;
+        this.longitude = longitude;
+        this.startsAt = startsAt;
+        this.endsAt = endsAt;
+        this.venue = venue;
+        this.organizer = organizer;
+        this.sourceUrl = sourceUrl;
+    }
+
+    public String getVenue() { return venue; }
+    public String getOrganizer() { return organizer; }
+    public String getSourceUrl() { return sourceUrl; }
+    public String getSeedKey() { return seedKey; }
+
     public UUID getId() {
         return id;
     }
