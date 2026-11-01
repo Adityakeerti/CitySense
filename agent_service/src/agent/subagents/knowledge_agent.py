@@ -92,11 +92,14 @@ class KnowledgeSpecialist(BaseSubAgent):
         if evidence.abstain or not evidence.usable_hits:
             if language == "hi":
                 answer = (
-                    "इस प्रश्न के लिए मेरे पास देहरादून नागरिक रिकॉर्ड में सत्यापित जानकारी नहीं है।"
+                    "मेरे पास इस प्रश्न के लिए देहरादून नागरिक रिकॉर्ड में सीधे सत्यापित जानकारी नहीं है। "
+                    "सहायता के लिए आप नगर निगम देहरादून नागरिक हेल्पलाइन (1800-180-4107) पर संपर्क कर सकते हैं या नागरिक शिकायत दर्ज कर सकते हैं।"
                 )
             else:
                 answer = (
-                    "I do not have verified municipal information for that question in civic records."
+                    "I do not have verified municipal information for that specific inquiry in Dehradun civic records.\n\n"
+                    "For assistance, you can report a civic issue directly to Nagar Nigam Dehradun, "
+                    "call the Citizen Toll-Free Helpline at **1800-180-4107**, or explore our live alerts."
                 )
 
             return SubAgentResult(
@@ -126,16 +129,36 @@ class KnowledgeSpecialist(BaseSubAgent):
             for h in usable
         ]
 
-        if language == "hi":
-            response_text = (
-                f"सत्यापित स्रोत ({best.title}) के अनुसार:\n\n{best.text.strip()}\n\n"
-                f"*स्रोत: {best.title}*"
+        # Synthesize via live LLM with grounded fallback
+        response_text = None
+        try:
+            from src.providers.registry import generate_with_failover
+            gen = await generate_with_failover(
+                system=(
+                    f"You are City Sense, the municipal AI assistant for Dehradun. "
+                    f"Answer the user's question directly, clearly, and informatively using the verified evidence provided. "
+                    f"Mention the verified source '{best.title}' in your answer."
+                ),
+                user=message,
+                context=[h.text for h in usable[:2]],
+                language=language,
             )
-        else:
-            response_text = (
-                f"Based on verified municipal records ({best.title}):\n\n{best.text.strip()}\n\n"
-                f"*Source: {best.title}*"
-            )
+            if gen and gen.text and len(gen.text.strip()) > 20:
+                response_text = gen.text.strip()
+        except Exception:
+            pass
+
+        if not response_text:
+            if language == "hi":
+                response_text = (
+                    f"सत्यापित स्रोत ({best.title}) के अनुसार:\n\n{best.text.strip()}\n\n"
+                    f"*स्रोत: {best.title}*"
+                )
+            else:
+                response_text = (
+                    f"Based on verified municipal records ({best.title}):\n\n{best.text.strip()}\n\n"
+                    f"*Source: {best.title}*"
+                )
 
         return SubAgentResult(
             status="ANSWERED",
@@ -145,3 +168,11 @@ class KnowledgeSpecialist(BaseSubAgent):
             execution_steps=execution_steps,
             metadata={"usable_count": len(usable), "top_title": best.title},
         )
+
+    async def area_brief(self, area: str, principal: Principal, trace: Any = None) -> list[str]:
+        """Ward / zone facts and helplines for an area, from the verified corpus (this desk's own tool)."""
+        from src.agent.tool_registry import KNOWLEDGE, call_tool
+
+        res = await call_tool(KNOWLEDGE, "get_ward_councillor_info", {"area": area[:200]}, principal.user_id, trace)
+        return [p["excerpt"] for p in res.get("passages", [])[:2]]
+

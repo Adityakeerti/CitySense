@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: citysense-core
+  servlet:
+    multipart:
+      max-file-size: ${MAX_UPLOAD_SIZE:10MB}
+      max-request-size: ${MAX_UPLOAD_SIZE:10MB}
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/citysense}
     username: ${SPRING_DATASOURCE_USERNAME:citysense}
@@ -25,6 +29,11 @@ management:
     web:
       exposure:
         include: health,info
+  health:
+    mail:
+      # SMTP is optional (OTP codes fall back to the log). Without this, an unset/empty SPRING_MAIL_HOST
+      # makes /actuator/health report DOWN even though the app is serving. Set true once SMTP is real.
+      enabled: ${MANAGEMENT_HEALTH_MAIL_ENABLED:false}
 
 springdoc:
   swagger-ui:
@@ -56,6 +65,8 @@ citysense:
   # Map provider proxy. Defaults use the public OpenStreetMap stack; respect its usage policies
   # (https://operations.osmfoundation.org/policies/) or point these at self-hosted servers.
   geo:
+    # Vector street map with 3D buildings (OpenFreeMap, no key). Empty = proxied raster tiles below.
+    vector-style-url: ${GEO_VECTOR_STYLE_URL:https://tiles.openfreemap.org/styles/liberty}
     tile-url-template: ${GEO_TILE_URL_TEMPLATE:https://tile.openstreetmap.org/{z}/{x}/{y}.png}
     attribution: ${GEO_ATTRIBUTION:© OpenStreetMap contributors}
     nominatim-url: ${GEO_NOMINATIM_URL:https://nominatim.openstreetmap.org}
@@ -81,6 +92,10 @@ citysense:
     filing-limit:
       max-per-window: ${COMPLAINT_FILING_LIMIT_MAX:10}
       window: ${COMPLAINT_FILING_LIMIT_WINDOW:PT1H}
+  # Python agent_service (main voice agent + planner). Unset = local keyword fallback only.
+  agent:
+    service-url: ${AGENT_SERVICE_URL:}
+    timeout-seconds: ${AGENT_TIMEOUT_SECONDS:30}
   avatars:
     seed-enabled: ${SEED_AVATARS:true}
     seed-location: ${AVATAR_SEED_LOCATION:classpath:seed/avatars.json}

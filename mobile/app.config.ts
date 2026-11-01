@@ -24,7 +24,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       backgroundColor: "#FFFFFF",
       foregroundImage: "./assets/android-icon-foreground.png",
     },
-    permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
+    permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "RECORD_AUDIO"],
     predictiveBackGestureEnabled: false,
   },
   plugins: [
@@ -43,6 +43,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       { android: { usesCleartextTraffic: apiBaseUrl.startsWith("http://") } },
     ],
     "@maplibre/maplibre-react-native",
+    ["expo-audio", { microphonePermission: "CitySense uses the microphone so you can talk to the city assistant." }],
   ],
   experiments: { typedRoutes: false },
 });

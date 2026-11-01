@@ -64,6 +64,13 @@ SAMPLE_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 
 app.mount("/videos", StaticFiles(directory=str(SAMPLE_VIDEOS_DIR)), name="videos")
 
+# Agent-facing dispatch / corridor / incident-feed API (see dispatch_api.py)
+from dispatch_api import build_dispatch_router, IncidentRecord  # noqa: E402
+
+dispatch_router = build_dispatch_router(hospital_service, router, graph)
+app.include_router(dispatch_router)
+_record_incident = dispatch_router.record_incident
+
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
@@ -71,7 +78,10 @@ def get_dashboard():
     ui_path = BASE_DIR / "ui.html"
     if ui_path.exists():
         return ui_path.read_text(encoding="utf-8")
-    return "<h1>ui.html not found</h1>"
+    return (
+        "<h1>CitySense Emergency Routing</h1><p>Service is running. API docs: "
+        "<a href='docs'>/docs</a> · health: <a href='api/health'>/api/health</a></p>"
+    )
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -189,6 +199,17 @@ def process_video_feed(video_name: str):
 
     incident, frame_b64, video_meta = vision_pipeline.process_video_file(str(video_path))
     state = emergency_agent.process_incident(incident)
+    if incident.incident_type != "NONE":
+        # Surface detections to the citizen agent's get_cctv_incident_feed tool.
+        _record_incident(IncidentRecord(
+            camera_id=incident.camera_id,
+            incident_type=incident.incident_type.lower(),
+            confidence=max(0.0, min(1.0, incident.confidence)),
+            location_label=incident.address,
+            latitude=incident.latitude,
+            longitude=incident.longitude,
+            summary=f"Detected in {video_name}",
+        ))
 
     return {
         "video_name": video_name,
@@ -451,4 +472,4 @@ def get_network_graph():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=int(os.getenv("PORT", "8002")))

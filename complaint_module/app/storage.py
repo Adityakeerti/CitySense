@@ -1,18 +1,32 @@
 import json
 import os
+import shutil
+import tempfile
+import threading
 import uuid
 from typing import List, Dict, Any, Optional
 from .models import Complaint, AuthorityModel, CitizenModel, WorkerModel
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-UPLOADS_DIR = os.path.join(DATA_DIR, "uploads")
+DATA_DIR = os.path.join(BASE_DIR, "data")  # read-only reference data shipped with the code
+# Mutable state (complaints + uploaded photos) can live on a mounted volume in production.
+STATE_DIR = os.getenv("COMPLAINT_STATE_DIR", DATA_DIR)
+UPLOADS_DIR = os.path.join(STATE_DIR, "uploads")
 AUTHORITIES_FILE = os.path.join(DATA_DIR, "authorities.json")
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 WORKERS_FILE = os.path.join(DATA_DIR, "workers.json")
-COMPLAINTS_FILE = os.path.join(DATA_DIR, "complaints.json")
+COMPLAINTS_FILE = os.path.join(STATE_DIR, "complaints.json")
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
+if STATE_DIR != DATA_DIR:
+    # Seed sample evidence photos into the volume so default photo URLs resolve.
+    for _name in os.listdir(os.path.join(DATA_DIR, "uploads")):
+        _target = os.path.join(UPLOADS_DIR, _name)
+        if not os.path.exists(_target):
+            shutil.copy2(os.path.join(DATA_DIR, "uploads", _name), _target)
+
+# The auto-escalation worker and API requests both write complaints.json.
+_WRITE_LOCK = threading.RLock()
 
 
 class DataStore:
@@ -59,8 +73,12 @@ class DataStore:
             return []
 
     def save_complaints(self, complaints: List[Complaint]):
-        with open(COMPLAINTS_FILE, "w", encoding="utf-8") as f:
-            json.dump([c.model_dump() for c in complaints], f, indent=2)
+        # Atomic replace so a crash mid-write never leaves a truncated JSON file.
+        with _WRITE_LOCK:
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(COMPLAINTS_FILE), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump([c.model_dump() for c in complaints], f, indent=2)
+            os.replace(tmp, COMPLAINTS_FILE)
 
     def get_complaint(self, tracking_id: str) -> Optional[Complaint]:
         for c in self.load_complaints():
@@ -69,6 +87,10 @@ class DataStore:
         return None
 
     def upsert_complaint(self, complaint: Complaint):
+        with _WRITE_LOCK:
+            self._upsert(complaint)
+
+    def _upsert(self, complaint: Complaint):
         complaints = self.load_complaints()
         found = False
         for idx, item in enumerate(complaints):
@@ -81,8 +103,7 @@ class DataStore:
         self.save_complaints(complaints)
 
     def reset_complaints(self):
-        with open(COMPLAINTS_FILE, "w", encoding="utf-8") as f:
-            json.dump([], f, indent=2)
+        self.save_complaints([])
 
 
 store = DataStore()

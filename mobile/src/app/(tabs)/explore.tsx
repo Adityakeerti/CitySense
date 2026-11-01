@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ExploreMap } from "../../components/ExploreMap";
+import { ExploreMap, MAP_PITCH } from "../../components/ExploreMap";
+import { PlaceSheet } from "../../components/PlaceSheet";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { errorMessage } from "../../api/client";
 import { avatarApi, geoApi } from "../../api/endpoints";
 import type { Avatar, Place } from "../../api/types";
+import { useAuth } from "../../auth/AuthContext";
 import { ErrorBanner, Loading } from "../../components/StateViews";
 import { absoluteUrl } from "../../config";
 import { useMapConfig } from "../../hooks/useMapConfig";
@@ -32,6 +34,9 @@ export default function Explore() {
   const [results, setResults] = useState<Result[]>([]);
   const [searching, setSearching] = useState(false);
   const [placePin, setPlacePin] = useState<Place | null>(null);
+  // Spot the main agent is briefing about (tap anywhere on the map).
+  const [tapped, setTapped] = useState<LatLng | null>(null);
+  const { language } = useAuth();
   // Camera commands sent before the native map finishes loading are dropped.
   const [mapReady, setMapReady] = useState(false);
 
@@ -63,6 +68,7 @@ export default function Explore() {
       if (!config) return;
       camera.current?.fitBounds(boundsAround(center.latitude, center.longitude, config.geofenceRadiusMeters), {
         padding: { top: 140, bottom: 90, left: 24, right: 24 },
+        pitch: MAP_PITCH,
         duration: mapDuration,
       });
     },
@@ -103,10 +109,17 @@ export default function Explore() {
     router.push({ pathname: "/avatar/[id]", params: { id: a.id } });
   };
 
+  // Tap empty map -> fly in low and tilted (3D buildings show from ~z15) and ask the main agent.
+  const onMapPress = (point: LatLng) => {
+    setQuery("");
+    setTapped(point);
+    camera.current?.flyTo({ center: [point.longitude, point.latitude], zoom: 16.3, pitch: 60, duration: mapDuration });
+  };
+
   const goToPlace = (p: Place) => {
     setQuery("");
     setPlacePin(p);
-    camera.current?.flyTo({ center: [p.longitude, p.latitude], zoom: 15, duration: mapDuration });
+    camera.current?.flyTo({ center: [p.longitude, p.latitude], zoom: 16, pitch: 60, duration: mapDuration });
   };
 
   const recenter = async () => {
@@ -134,6 +147,8 @@ export default function Explore() {
         coords={coords}
         onOpenAvatar={openAvatar}
         onMapReady={() => setMapReady(true)}
+        onMapPress={onMapPress}
+        tappedPoint={tapped}
       />
 
       <View style={[styles.searchWrap, { top: insets.top + 10 }]}>
@@ -142,7 +157,7 @@ export default function Explore() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search Avatars"
+            placeholder="Search avatars & places · tap the map to ask"
             placeholderTextColor="#7A7A85"
             style={styles.searchInput}
             returnKeyType="search"
@@ -206,6 +221,8 @@ export default function Explore() {
           </FadeIn>
         ) : null}
       </View>
+
+      {tapped ? <PlaceSheet point={tapped} language={language ?? "en"} onClose={() => setTapped(null)} /> : null}
 
       <View style={styles.bottomRow} pointerEvents="box-none">
         <View style={styles.countChip}>

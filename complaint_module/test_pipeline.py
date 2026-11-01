@@ -1,6 +1,10 @@
 import os
 import sys
+import tempfile
 import unittest
+
+# Keep test writes away from the real data/complaints.json.
+os.environ.setdefault("COMPLAINT_STATE_DIR", tempfile.mkdtemp(prefix="complaint-test-"))
 from fastapi.testclient import TestClient
 
 # Add module to sys.path
@@ -191,10 +195,30 @@ class TestComplaintModule(unittest.TestCase):
         res = self.client.get("/")
         self.assertEqual(res.status_code, 200)
         html = res.text
+        if not os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "UI.html")):
+            # The standalone UI moved to the unified dashboard; "/" serves a service landing page.
+            self.assertIn("Civic Complaint", html)
+            return
         self.assertIn("CitySense Civic Grievance & Escalation System", html)
         self.assertIn("Member C", html)
         self.assertIn("--primary: #1d4ed8;", html)
         print("[PASS] UI.html verified and accessible.")
+
+    def test_07b_reassign_worker(self):
+        """Stalled complaints can be reassigned to a rapid action squad."""
+        res = self.client.post("/api/complaints", data={
+            "title": "Deep pothole near Clock Tower",
+            "description": "Large pothole on the main road causing two-wheeler accidents every evening.",
+            "category": "pothole",
+        })
+        self.assertEqual(res.status_code, 200)
+        tid = res.json()["tracking_id"]
+        before = res.json()["assigned_worker"]
+        out = self.client.post(f"/api/complaints/{tid}/reassign", json={"reason": "No progress"})
+        self.assertEqual(out.status_code, 200)
+        self.assertNotEqual(out.json()["assigned_worker"]["id"], (before or {}).get("id"))
+        self.assertEqual(out.json()["timeline"][-1]["action"], "WORKER_REASSIGNED")
+        self.assertEqual(self.client.post("/api/complaints/NOPE-1/reassign").status_code, 404)
 
     def test_08_langgraph_compiled_workflow(self):
         """LangGraph StateGraph nodes and conditional execution are verified."""
@@ -256,6 +280,50 @@ class TestComplaintModule(unittest.TestCase):
         self.assertEqual(c["status"], ComplaintStatus.RESOLVED.value)
         self.assertEqual(c["resolved_at_stage"], "WARNING_2")
         print("[PASS] Intermediate resolution verified: resolved_at_stage correctly pinned to WARNING_2.")
+
+    def test_11_meta_ladder_matches_status_enum(self):
+        """/api/meta lists every non-terminal status in escalation order, one label each."""
+        meta = self.client.get("/api/meta").json()
+        expected = [s.value for s in ComplaintStatus if s != ComplaintStatus.RESOLVED]
+        self.assertEqual(meta["statuses"], expected)
+        self.assertEqual(len(meta["escalationLadder"]), len(expected))
+
+    def test_12_notices_publish_list_revoke(self):
+        """Portal publishes a notice, the feed lists it newest-first, and it can be revoked."""
+        from app import notices as notices_mod
+        if os.path.exists(notices_mod.NOTICES_FILE):
+            os.remove(notices_mod.NOTICES_FILE)
+
+        first = self.client.post("/api/notices", json={"title": "Water supply shutdown", "department": "Jal Sansthan"})
+        self.assertEqual(first.status_code, 201, first.text)
+        second = self.client.post("/api/notices", json={
+            "title": "Road closure on Rajpur Road", "department": "PWD", "priority": "Urgent", "tags": [" roads ", ""],
+        }).json()
+        self.assertTrue(second["id"].startswith("NOT-"))
+        self.assertTrue(second["referenceNumber"].startswith("UK-GOV/PWD/"))
+        self.assertEqual(second["tags"], ["roads"])
+
+        listed = self.client.get("/api/notices").json()
+        self.assertEqual([n["id"] for n in listed], [second["id"], first.json()["id"]])
+
+        self.assertEqual(self.client.delete(f"/api/notices/{second['id']}").status_code, 204)
+        self.assertEqual(self.client.delete(f"/api/notices/{second['id']}").status_code, 404)
+        self.assertEqual(len(self.client.get("/api/notices").json()), 1)
+
+    def test_13_notices_validation_and_expiry(self):
+        """Bad input is rejected; expired notices drop out of the feed unless asked for."""
+        from app import notices as notices_mod
+        if os.path.exists(notices_mod.NOTICES_FILE):
+            os.remove(notices_mod.NOTICES_FILE)
+
+        self.assertEqual(self.client.post("/api/notices", json={"title": "x", "department": "PWD"}).status_code, 422)
+        self.assertEqual(self.client.post("/api/notices", json={
+            "title": "Bad date", "department": "PWD", "expiryDate": "not-a-date"}).status_code, 422)
+
+        self.client.post("/api/notices", json={
+            "title": "Old advisory", "department": "PWD", "expiryDate": "2020-01-01T00:00:00Z"})
+        self.assertEqual(self.client.get("/api/notices").json(), [])
+        self.assertEqual(len(self.client.get("/api/notices?include_expired=true").json()), 1)
 
 
 if __name__ == "__main__":

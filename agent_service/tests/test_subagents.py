@@ -128,7 +128,9 @@ async def test_emergency_specialist_critical_ambulance(principal):
         language="en",
     )
     assert result.status == "ACTION_PENDING"
-    assert result.execution_steps == ["triage_severity", "query_corridor", "generate_guidance"]
+    assert result.execution_steps == [
+        "triage_severity", "dispatch_unit", "query_corridor", "preempt_signals", "generate_guidance"
+    ]
     assert result.metadata["severity"] == "CRITICAL"
     assert result.cta == "dispatch_emergency"
     assert result.action is not None
@@ -148,7 +150,9 @@ async def test_emergency_specialist_critical_fire_truck(principal):
         language="en",
     )
     assert result.status == "ACTION_PENDING"
-    assert result.execution_steps == ["triage_severity", "query_corridor", "generate_guidance"]
+    assert result.execution_steps == [
+        "triage_severity", "dispatch_unit", "query_corridor", "preempt_signals", "generate_guidance"
+    ]
     assert result.metadata["severity"] == "CRITICAL"
     assert result.action["vehicle_type"] == "fire_truck"
 
@@ -163,11 +167,21 @@ async def test_emergency_specialist_advisory_traffic(principal):
         language="en",
     )
     assert result.status == "ANSWERED"
-    assert result.execution_steps == ["triage_severity", "query_corridor", "generate_guidance"]
+    # Congestion data belongs to CityPulse; the emergency specialist only checks its CCTV feed.
+    assert result.execution_steps == ["triage_severity", "check_incident_feed", "generate_guidance"]
     assert result.metadata["severity"] == "ADVISORY"
     assert result.action is None
     assert result.cta == "view_alternate_routes"
-    assert "Density" in result.response_text or "TRAFFIC" in result.response_text
+    assert "TRAFFIC" in result.response_text
+
+
+async def test_emergency_question_does_not_dispatch(principal):
+    agent = EmergencySpecialist()
+    result = await agent.execute(
+        session=None, principal=principal, message="Is there an accident on Rajpur Road?", language="en"
+    )
+    assert result.action is None
+    assert "dispatch_unit" not in result.execution_steps
 
 
 # ============================================================================
@@ -211,7 +225,7 @@ async def test_knowledge_specialist_verified_with_mock_hits(principal, monkeypat
     assert result.execution_steps == ["retrieve_evidence", "validate_evidence", "synthesize_or_abstain"]
     assert len(result.sources) >= 1
     assert result.sources[0]["title"] == "NND Property Tax Guidelines"
-    assert "Property tax" in result.response_text
+    assert "property tax" in result.response_text.lower()
 
 
 async def test_knowledge_specialist_abstains_on_unverified_evidence(principal, monkeypatch):

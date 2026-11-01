@@ -8,6 +8,6 @@ if [ ! -d ".venv" ]; then
     ~/.local/bin/uv pip install -r requirements.txt --python .venv
 fi
 
-echo "[*] Starting Civic Complaint & Escalation Service on http://localhost:8000"
-echo "[*] Open UI: http://localhost:8000"
-.venv/bin/uvicorn app.server:app --host 0.0.0.0 --port 8000 --reload
+echo "[*] Starting Civic Complaint & Escalation Service on http://localhost:8001"
+echo "[*] Open UI: http://localhost:8001"
+.venv/bin/uvicorn app.server:app --host 0.0.0.0 --port 8001 --reload

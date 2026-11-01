@@ -18,13 +18,15 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { errorMessage } from "../../api/client";
-import { avatarApi } from "../../api/endpoints";
-import type { Avatar, ChatIntent } from "../../api/types";
+import { agentApi, avatarApi } from "../../api/endpoints";
+import type { Avatar, ChatIntent, PendingAgentAction, PlanStep } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { LinkText } from "../../components/LinkText";
 import { ErrorBanner, Loading } from "../../components/StateViews";
 import { TabBar } from "../../components/TabBar";
 import { TABS } from "../../content/tabs";
+import { useUserLocation } from "../../hooks/useUserLocation";
+import { useVoice } from "../../hooks/useVoice";
 import { absoluteUrl } from "../../config";
 import { images } from "../../content/onboarding";
 import { duration, isReducedMotion, timing } from "../../motion";
@@ -38,7 +40,29 @@ interface Message {
   text: string;
   link?: string;
   sources?: string[];
+  viaVoice?: boolean;
+  plan?: PlanStep[] | null;
+  pending?: PendingAgentAction | null;
+  pendingState?: "open" | "working" | "done";
+  emergency?: Record<string, any> | null;
 }
+
+/** Friendly names for the agents that appear in an execution plan. */
+const EXECUTOR_LABEL: Record<string, string> = {
+  main_voice_agent: "City Sense",
+  civic_complaint: "Complaint desk",
+  emergency_traffic: "Emergency desk",
+  city_pulse: "City Pulse",
+  knowledge_specialist: "Knowledge desk",
+  local_agent: "Local agent",
+};
+const STEP_ICON: Record<PlanStep["status"], string> = {
+  completed: "✓",
+  failed: "✕",
+  skipped: "–",
+  running: "…",
+  planned: "•",
+};
 
 const CHIPS: { intent: ChatIntent; label: string; icon: keyof typeof Ionicons.glyphMap; needs?: keyof Avatar }[] = [
   { intent: "INTRO", label: "Introduce yourself?", icon: "hand-left-outline" },
@@ -50,6 +74,8 @@ export default function AvatarScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { language } = useAuth();
+  const voice = useVoice(language ?? "en");
+  const { coords } = useUserLocation();
   const [avatar, setAvatar] = useState<Avatar | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -81,9 +107,12 @@ export default function AvatarScreen() {
     void load();
   }, [load]);
 
-  const ask = async (opts: { message?: string; intent?: ChatIntent; label: string }) => {
+  const patch = (id: string, change: Partial<Message>) =>
+    setMessages((m) => m.map((x) => (x.id === id ? { ...x, ...change } : x)));
+
+  const ask = async (opts: { message?: string; intent?: ChatIntent; label: string; viaVoice?: boolean }) => {
     if (!avatar || sending) return;
-    setMessages((m) => [...m, { id: `${Date.now()}-me`, from: "me", text: opts.label }]);
+    setMessages((m) => [...m, { id: `${Date.now()}-me`, from: "me", text: opts.label, viaVoice: opts.viaVoice }]);
     setSending(true);
     try {
       const res = await avatarApi.chat(avatar.id, {
@@ -91,9 +120,26 @@ export default function AvatarScreen() {
         intent: opts.intent,
         language,
         sessionId: session.current,
+        latitude: coords?.latitude,
+        longitude: coords?.longitude,
       });
       session.current = res.sessionId;
-      setMessages((m) => [...m, { id: `${Date.now()}-av`, from: "avatar", text: res.reply, link: res.link, sources: res.sources }]);
+      const id = `${Date.now()}-av`;
+      setMessages((m) => [
+        ...m,
+        {
+          id,
+          from: "avatar",
+          text: res.reply,
+          link: res.link,
+          sources: res.sources,
+          plan: res.plan,
+          pending: res.pendingAction,
+          pendingState: res.pendingAction ? "open" : undefined,
+          emergency: res.actionData?.emergency ?? null,
+        },
+      ]);
+      if (voice.autoPlay && res.reply) void voice.speak(id, res.reply);
     } catch (e) {
       setMessages((m) => [...m, { id: `${Date.now()}-err`, from: "avatar", text: `⚠️ ${errorMessage(e)}` }]);
     } finally {
@@ -106,6 +152,41 @@ export default function AvatarScreen() {
     if (!text) return;
     setDraft("");
     void ask({ message: text, label: text });
+  };
+
+  const toggleMic = async () => {
+    if (voice.state === "transcribing" || sending) return;
+    if (voice.state === "recording") {
+      try {
+        const transcript = await voice.stopAndTranscribe();
+        void ask({ message: transcript, label: transcript, viaVoice: true });
+      } catch (e) {
+        setMessages((m) => [...m, { id: `${Date.now()}-err`, from: "avatar", text: `⚠️ ${errorMessage(e)} You can type instead.` }]);
+      }
+      return;
+    }
+    const problem = await voice.startRecording().catch((e) => errorMessage(e));
+    if (problem) setMessages((m) => [...m, { id: `${Date.now()}-err`, from: "avatar", text: `⚠️ ${problem}` }]);
+  };
+
+  /** Agent proposes, citizen disposes: only an explicit tap files the drafted complaint. */
+  const decide = async (msg: Message, confirm: boolean) => {
+    if (!msg.pending) return;
+    patch(msg.id, { pendingState: "working" });
+    try {
+      const res = confirm ? await agentApi.confirm(msg.pending.token) : await agentApi.cancel(msg.pending.token);
+      const text =
+        res.status === "executed"
+          ? `✅ Complaint filed. Tracking ID: ${res.result?.trackingId ?? "—"}${res.result?.assignedWorker ? `\nAssigned to: ${res.result.assignedWorker}` : ""}`
+          : res.status === "cancelled"
+            ? "Okay — I've discarded that draft."
+            : `⚠️ ${res.detail ?? "That action could not be completed."}`;
+      patch(msg.id, { pendingState: "done" });
+      setMessages((m) => [...m, { id: `${Date.now()}-act`, from: "avatar", text }]);
+    } catch (e) {
+      patch(msg.id, { pendingState: "open" });
+      setMessages((m) => [...m, { id: `${Date.now()}-err`, from: "avatar", text: `⚠️ ${errorMessage(e)}` }]);
+    }
   };
 
   // Optimistic toggle; core returns the authoritative count.
@@ -160,7 +241,14 @@ export default function AvatarScreen() {
               <Image source={images.bot} style={styles.bot} contentFit="contain" />
             </View>
           </View>
-          <View style={{ width: 36 }} />
+          <Tap
+            style={[styles.back, { backgroundColor: voice.autoPlay ? colors.navy : "#9A9AA3" }]}
+            onPress={voice.toggleAutoPlay}
+            accessibilityLabel={voice.autoPlay ? "Mute assistant voice" : "Unmute assistant voice"}
+            accessibilityState={{ checked: voice.autoPlay }}
+          >
+            <Ionicons name={voice.autoPlay ? "volume-high" : "volume-mute"} size={18} color="#fff" />
+          </Tap>
         </View>
 
         <View style={styles.stage}>
@@ -193,7 +281,56 @@ export default function AvatarScreen() {
             >
               {messages.map((m) => (
                 <FadeIn key={m.id} style={[styles.bubble, m.from === "me" ? styles.mine : styles.theirs]}>
-                  <Text style={[styles.bubbleText, m.from === "me" && { color: "#fff" }]}>{m.text}</Text>
+                  <Text style={[styles.bubbleText, m.from === "me" && { color: "#fff" }]}>
+                    {m.viaVoice ? "🎙️ " : ""}
+                    {m.text}
+                  </Text>
+                  {m.plan && m.plan.length > 0 ? (
+                    <View style={styles.plan} accessibilityLabel="How I handled this">
+                      {m.plan.map((st) => (
+                        <Text key={st.id} style={styles.planStep}>
+                          {STEP_ICON[st.status] ?? "•"} {EXECUTOR_LABEL[st.executor] ?? st.executor}: {st.action}
+                        </Text>
+                      ))}
+                    </View>
+                  ) : null}
+                  {m.emergency ? (
+                    <View style={styles.emergency}>
+                      <Text style={styles.emergencyTitle}>
+                        🚨 {m.emergency.mission_id ?? "Dispatch"} · {m.emergency.status}
+                      </Text>
+                      {m.emergency.hospital ? <Text style={styles.planStep}>Hospital: {m.emergency.hospital}</Text> : null}
+                      {m.emergency.eta_minutes != null ? <Text style={styles.planStep}>ETA: {m.emergency.eta_minutes} min</Text> : null}
+                      <Tap style={styles.callBtn} onPress={() => Linking.openURL("tel:112")} accessibilityLabel="Call 112">
+                        <Ionicons name="call" size={14} color="#fff" />
+                        <Text style={styles.callText}>Call 112</Text>
+                      </Tap>
+                    </View>
+                  ) : null}
+                  {m.pending && m.pendingState !== "done" ? (
+                    <View style={styles.pending}>
+                      <Text style={styles.planStep}>{m.pending.summary}</Text>
+                      <View style={styles.pendingRow}>
+                        <Tap style={[styles.pendingBtn, { backgroundColor: colors.success }]} disabled={m.pendingState === "working"} onPress={() => decide(m, true)} accessibilityLabel="Confirm and file complaint">
+                          <Text style={styles.callText}>{m.pendingState === "working" ? "Filing…" : "Confirm"}</Text>
+                        </Tap>
+                        <Tap style={[styles.pendingBtn, { backgroundColor: "#9A9AA3" }]} disabled={m.pendingState === "working"} onPress={() => decide(m, false)} accessibilityLabel="Discard draft">
+                          <Text style={styles.callText}>Cancel</Text>
+                        </Tap>
+                      </View>
+                    </View>
+                  ) : null}
+                  {m.from === "avatar" && m.text && !m.text.startsWith("⚠️") ? (
+                    <Tap
+                      feedback="dim"
+                      style={styles.play}
+                      hitSlop={8}
+                      onPress={() => (voice.speakingId === m.id ? voice.stopSpeaking() : voice.speak(m.id, m.text))}
+                      accessibilityLabel={voice.speakingId === m.id ? "Stop reading aloud" : "Read aloud"}
+                    >
+                      <Ionicons name={voice.speakingId === m.id ? "stop-circle-outline" : "play-circle-outline"} size={18} color={colors.accentBlue} />
+                    </Tap>
+                  ) : null}
                   {m.link ? (
                     <LinkText style={styles.linkText} containerStyle={{ alignSelf: "flex-start" }} accessibilityRole="link" onPress={() => Linking.openURL(m.link!)}>
                       Open website ↗
@@ -230,10 +367,27 @@ export default function AvatarScreen() {
             ))}
           </ScrollView>
           <View style={styles.inputRow}>
+            <Tap
+              feedback="dim"
+              onPress={toggleMic}
+              disabled={sending || voice.state === "transcribing"}
+              hitSlop={8}
+              accessibilityLabel={voice.state === "recording" ? "Stop recording and send" : "Speak your message"}
+            >
+              {voice.state === "transcribing" ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons
+                  name={voice.state === "recording" ? "stop-circle" : "mic"}
+                  size={22}
+                  color={voice.state === "recording" ? colors.danger : colors.primary}
+                />
+              )}
+            </Tap>
             <TextInput
               value={draft}
               onChangeText={setDraft}
-              placeholder="Type your message here..."
+              placeholder={voice.state === "recording" ? "Listening… tap ■ to send" : "Type or tap the mic..."}
               placeholderTextColor="#8A8A95"
               style={styles.input}
               onSubmitEditing={send}
@@ -356,4 +510,24 @@ const styles = StyleSheet.create({
     height: 46,
   },
   input: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text },
+  plan: { marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.border, gap: 2 },
+  planStep: { fontFamily: fonts.regular, fontSize: 11, color: colors.textMuted, lineHeight: 16 },
+  emergency: { marginTop: 8, padding: 8, borderRadius: 10, backgroundColor: "#FDECEC", gap: 2 },
+  emergencyTitle: { fontFamily: fonts.bold, fontSize: 12, color: colors.danger },
+  callBtn: {
+    marginTop: 6,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.danger,
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  callText: { fontFamily: fonts.bold, fontSize: 12, color: "#fff" },
+  pending: { marginTop: 8, padding: 8, borderRadius: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, gap: 6 },
+  pendingRow: { flexDirection: "row", gap: 8 },
+  pendingBtn: { borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 6 },
+  play: { alignSelf: "flex-end", marginTop: 4 },
 });

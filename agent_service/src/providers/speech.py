@@ -1,5 +1,7 @@
-import httpx
 import base64
+import re
+
+import httpx
 
 from src.config import settings
 
@@ -55,6 +57,22 @@ async def transcribe_with_fallback(
     raise RuntimeError("No STT provider available; use keyboard dictation")
 
 
+_MD_RE = re.compile(r"[*_`#>|]+|\[(?:[^\]]*)\]\([^)]*\)|^-{3,}$", re.MULTILINE)
+_EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]+")
+
+
+def speakable(text: str, limit: int = 500) -> str:
+    """Strip markdown / emoji so TTS reads the message, not its formatting."""
+    clean = _EMOJI_RE.sub(" ", _MD_RE.sub(" ", text))
+    clean = re.sub(r"^\s*(?:[•\-–]|\d+\.)\s*", "", clean, flags=re.MULTILINE)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if len(clean) <= limit:
+        return clean
+    cut = clean[:limit]
+    end = max(cut.rfind(". "), cut.rfind("। "), cut.rfind("? "))
+    return cut[: end + 1] if end > limit // 2 else cut
+
+
 async def synthesize_speech(
     text: str,
     language: str = "hi",
@@ -74,7 +92,7 @@ async def synthesize_speech(
     chosen_speaker = speaker if speaker in valid_speakers else "aditya"
 
     payload = {
-        "inputs": [text[:500]],
+        "inputs": [speakable(text)],
         "target_language_code": lang_code,
         "speaker": chosen_speaker,
         "model": "bulbul:v3",

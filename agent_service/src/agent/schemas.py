@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class ChatContext(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     cityId: str | None = Field(default=None, min_length=1, max_length=100)
+    # Optional device GPS so location-dependent steps (dispatch, complaint filing) are precise.
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
 class ChatRequest(BaseModel):
@@ -41,6 +44,24 @@ class PendingActionView(BaseModel):
     action_type: str = "create_complaint"
 
 
+class PlanStepView(BaseModel):
+    """One step of the main voice agent's execution plan, as shown to the citizen."""
+    id: int
+    executor: str
+    action: str
+    tools: list[str] = Field(default_factory=list)
+    status: Literal["planned", "running", "completed", "failed", "skipped"] = "planned"
+    detail: str | None = None
+
+
+class ToolCallView(BaseModel):
+    tool: str
+    caller: str
+    served: str
+    ok: bool
+    durationMs: float
+
+
 class AgentResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     sessionId: UUID
@@ -60,6 +81,10 @@ class AgentResponse(BaseModel):
     handoff: dict[str, str] | None = None
     pendingAction: PendingActionView | None = None
     served: Literal["live", "cache", "fallback"]
+    plan: list[PlanStepView] | None = None
+    toolCalls: list[ToolCallView] | None = None
+    # Structured cards for the client (e.g. emergency mission tracking, resolved location).
+    actionData: dict[str, Any] | None = None
 
 
 class SessionCreate(BaseModel):
@@ -84,3 +109,9 @@ class ConfirmResponse(BaseModel):
     status: Literal["executed", "failed", "rejected", "cancelled"]
     result: dict[str, Any] | None = None
     detail: str | None = None
+
+
+class AudioPreference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    auto_play: bool
+    preferred_speaker: str = Field(default="aditya", max_length=30)

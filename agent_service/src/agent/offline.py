@@ -3,6 +3,7 @@ import logging
 import re
 import secrets
 import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ logger = logging.getLogger("citysense.offline")
 # In-memory storage for offline mode
 PENDING_ACTIONS: dict[str, dict[str, Any]] = {}
 OFFLINE_SESSIONS: dict[UUID, dict[str, Any]] = {}
+SESSION_HISTORY: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
 # Initial seeded Dehradun complaints for the Worker Island
 MOCK_COMPLAINTS: list[dict[str, Any]] = [
@@ -223,9 +225,13 @@ async def offline_chat(
     started: float
 ) -> AgentResponse:
     session_id = request.sessionId or uuid4()
+    session_key = str(session_id)
     message_id = uuid4()
     agent_id = request.agentId or "general"
     agent_name = "Municipal Grievance Officer" if agent_id == "municipal" else "City Sense"
+
+    # Multi-turn conversation history lookup (up to 6 previous turns)
+    prior_history = list(SESSION_HISTORY[session_key][-6:])
 
     # Detect language
     is_hindi = (
@@ -234,148 +240,242 @@ async def offline_chat(
     )
     lang = "hi" if is_hindi else "en"
 
-    # Guardrail Check: Input Safety, Scope Classification & Polite Refusal
-    from src.agent.guardrails import QueryScope, build_polite_refusal, classify_scope
-    scope_result = classify_scope(request.message, lang)
+    # Tier 1 & Tier 2: Supervised Guardrails & Sub-Agent Orchestration (with context memory)
+    from src.agent.orchestrator import supervisor
+    from src.models import AgentConfig, ChatSession
 
-    if scope_result.scope in (QueryScope.INJECTION, QueryScope.CIVIC_GREETING, QueryScope.OUT_OF_SCOPE):
-        refusal = build_polite_refusal(scope_result.scope, lang, scope_result.detected_topic)
-        return refusal.to_agent_response(
-            session_id=session_id,
-            message_id=message_id,
-            agent_id=agent_id,
-            agent_name=agent_name,
-        )
+    outcome = await supervisor.evaluate_turn(
+        session=None,
+        principal=principal,
+        request=request,
+        chat_session=ChatSession(user_id=principal.user_id, agent_id=agent_id, language=lang),
+        agent=AgentConfig(agent_id=agent_id, name=agent_name, role="citizen_agent", system_prompt=""),
+        language=lang,
+        city=request.context.cityId or "dehradun",
+        started=started,
+        history=prior_history,
+    )
 
-    # 1. Action Check: Is this a complaint or service request to lodge?
-    is_complaint = detect_complaint_intent(request.message)
-    is_reporting = any(w in request.message.lower() for w in [
-        "there is", "broken", "overflow", "not working", "fix", "please", "huge",
-        "near", "at", "road", "खराब", "है", "टूटी", "गंदा", "कचरा", "भर गया", "करो"
-    ])
+    handled, status, answer, sources, cta, pending_action = (
+        outcome.handled, outcome.status, outcome.answer, outcome.sources, outcome.cta, outcome.pending_action
+    )
+    from src.agent.orchestrator import finalize_plan
 
-    if is_complaint and (is_reporting or agent_id == "municipal"):
-        token = secrets.token_hex(16)
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    plan_fields = {"plan": outcome.plan, "toolCalls": outcome.tool_calls, "actionData": outcome.action_data}
+    if not handled:
+        finalize_plan(outcome.plan, "ANSWERED")
+    if handled:
+        # Save this turn to multi-turn conversation memory
+        SESSION_HISTORY[session_key].append({"role": "user", "content": request.message})
+        SESSION_HISTORY[session_key].append({"role": "assistant", "content": answer})
 
-        category = "Civic Grievance"
-        msg_l = request.message.lower()
-        if "pothole" in msg_l or "road" in msg_l or "गड्ढा" in msg_l or "सड़क" in msg_l:
-            category = "Potholes and Road Damage"
-        elif "light" in msg_l or "streetlight" in msg_l or "लाइट" in msg_l:
-            category = "Defective Streetlights"
-        elif "garbage" in msg_l or "waste" in msg_l or "कूड़ा" in msg_l or "कचरा" in msg_l:
-            category = "Garbage and Sanitation Dumps"
-        elif "water" in msg_l or "drain" in msg_l or "नाली" in msg_l or "पानी" in msg_l:
-            category = "Blocked Drains and Water Supply"
-
-        summary = (
-            f"Lodge {category} complaint with Nagar Nigam Dehradun"
-            if lang == "en"
-            else f"देहरादून नगर निगम में {category} संबंधी नागरिक शिकायत दर्ज करें"
-        )
-
-        PENDING_ACTIONS[token] = {
-            "token": token,
-            "user_id": principal.user_id,
-            "agent_id": agent_id,
-            "category": category,
-            "summary": summary,
-            "message": request.message,
-            "expires_at": expires_at,
-            "status": "pending",
-            "city_id": request.context.cityId or "dehradun"
-        }
-
-        answer = (
-            f"I have prepared a civic grievance draft under '{category}' for Nagar Nigam Dehradun based on your report. "
-            "Please review the action card below and click 'Confirm' to dispatch the municipal inspection unit."
-            if lang == "en"
-            else
-            f"मैंने आपकी रिपोर्ट के आधार पर देहरादून नगर निगम के लिए '{category}' श्रेणी में शिकायत का मसौदा तैयार किया है। "
-            "कृपया नीचे दिए गए कार्ड की समीक्षा करें और संबंधित वार्ड निरीक्षण दल को भेजने के लिए 'Confirm' पर क्लिक करें।"
-        )
-
-        pending_view = PendingActionView(
-            token=token,
-            summary=summary,
-            expiresAt=expires_at,
-            action_type="create_complaint"
-        )
+        source_objects = []
+        for s in (sources or []):
+            if isinstance(s, dict):
+                source_objects.append(
+                    Source(
+                        docId=s.get("doc_id", "DOC"),
+                        title=s.get("title", "Official Record"),
+                        url=s.get("url", ""),
+                        excerpt=s.get("excerpt"),
+                        fetchedAt=datetime.now(timezone.utc),
+                        stale=False,
+                    )
+                )
+            elif isinstance(s, Source):
+                source_objects.append(s)
 
         return AgentResponse(
             sessionId=session_id,
             messageId=message_id,
-            status="ACTION_PENDING",
+            status=status,
             answer=answer,
             agent=AgentInfo(id=agent_id, name=agent_name),
-            sources=[],
-            cta="confirm_complaint",
-            pendingAction=pending_view,
-            served="fallback"
+            sources=source_objects,
+            cta=cta or "report_issue",
+            pendingAction=pending_action,
+            served="fallback",
+            **plan_fields,
         )
 
-    # 2. Knowledge Retrieval from Verified Corpus
+    # Tier 3: Agentic Tool-Calling Loop with Real-Time APIs & LLM Synthesis
+    from src.agent.tool_registry import TOOL_OWNERS, call_tool
+    from src.agent.tools import READ_TOOL_NAMES, tool_schemas
+    available_tools = tool_schemas(READ_TOOL_NAMES)
+
+    # Context from verified municipal corpus
     hits = offline_corpus.search(request.message, lang)
+    context_texts = [h[0].get("text", "") for h in hits[:2]] if hits else [
+        "Nagar Nigam Dehradun provides municipal civil works, sanitation, public lighting, and health services across 100 wards."
+    ]
 
-    if not hits or hits[0][1] < 2.0:
-        # Strict Abstain Rule
-        abstain_msg = (
-            "इस प्रश्न के लिए मेरे पास देहरादून नागरिक रिकॉर्ड में सत्यापित जानकारी नहीं है।"
-            if lang == "hi"
-            else
-            "I do not have verified municipal information for that question in Dehradun civic records."
+    llm_history = [{"role": m["role"], "content": m["content"]} for m in prior_history]
+    llm_history.append({"role": "user", "content": request.message})
+
+    llm_answer = None
+    served_provider = "fallback"
+    tool_sources: list[Source] = []
+
+    try:
+        from src.providers.registry import generate_with_failover
+        gen_res = await generate_with_failover(
+            system=(
+                "You are City Sense, the official municipal AI assistant for Dehradun Nagar Nigam. "
+                "Synthesize helpful, accurate, and articulate answers for citizens. "
+                "Use the available tools when the citizen asks for real-time information such as "
+                "active alerts, traffic density, emergency corridors, civic events, or listing municipal complaints. "
+                "Respond courteously, clearly, and actionably."
+            ),
+            user=request.message,
+            context=context_texts,
+            language=lang,
+            tools=available_tools,
+            history=llm_history,
         )
+
+        if gen_res.tool_calls:
+            tool_history = list(llm_history)
+            tool_history.append({
+                "role": "assistant",
+                "content": gen_res.text or "",
+                "tool_calls": gen_res.tool_calls,
+            })
+            for call in gen_res.tool_calls:
+                fn_name = call.get("function", {}).get("name", "")
+                raw_args = call.get("function", {}).get("arguments", "{}")
+                parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+                tool_data = await call_tool(TOOL_OWNERS[fn_name], fn_name, parsed_args, principal.user_id)
+                tool_history.append({
+                    "role": "tool",
+                    "tool_call_id": call.get("id", "unknown"),
+                    "content": json.dumps(tool_data, ensure_ascii=False),
+                })
+                tool_sources.append(
+                    Source(
+                        docId=fn_name,
+                        title=f"Municipal API: {fn_name.replace('_', ' ').title()}",
+                        url="https://nagarnigamdehradun.com",
+                        excerpt=json.dumps(tool_data, ensure_ascii=False)[:300],
+                        fetchedAt=datetime.now(timezone.utc),
+                        stale=False,
+                    )
+                )
+
+            synth_res = await generate_with_failover(
+                system=(
+                    "You are City Sense, the official municipal AI assistant for Dehradun Nagar Nigam. "
+                    "Synthesize a clear, structured, and helpful response for the citizen based on the tool execution results."
+                ),
+                user="",
+                context=context_texts,
+                language=lang,
+                history=tool_history,
+            )
+            if synth_res and synth_res.text and len(synth_res.text.strip()) > 15:
+                llm_answer = synth_res.text.strip()
+                served_provider = synth_res.provider
+        elif gen_res and gen_res.text and len(gen_res.text.strip()) > 15:
+            llm_answer = gen_res.text.strip()
+            served_provider = gen_res.provider
+    except Exception as exc:
+        logger.warning("Live LLM tool execution exception: %s", exc)
+
+    if llm_answer:
+        SESSION_HISTORY[session_key].append({"role": "user", "content": request.message})
+        SESSION_HISTORY[session_key].append({"role": "assistant", "content": llm_answer})
         return AgentResponse(
             sessionId=session_id,
             messageId=message_id,
-            status="ABSTAINED",
-            answer=abstain_msg,
-            agent=AgentInfo(id=agent_id, name=agent_name),
-            sources=[],
-            cta="file_complaint",
-            served="fallback"
+            status="ANSWERED",
+            answer=llm_answer,
+            agent=AgentInfo(id=agent_id, name=f"City Sense ({served_provider.title()})"),
+            sources=tool_sources if tool_sources else ([Source(docId=hits[0][0]["doc_id"], title=hits[0][0]["title"], url=hits[0][0]["url"], excerpt=hits[0][2], fetchedAt=datetime.now(timezone.utc), stale=False)] if hits else []),
+            cta="report_issue",
+            served="live" if served_provider != "fallback" else "fallback",
+            **plan_fields,
         )
 
-    best_doc, score, excerpt = hits[0]
-    sources = [
-        Source(
-            docId=best_doc["doc_id"],
-            title=best_doc["title"],
-            url=best_doc["url"],
-            excerpt=excerpt,
-            fetchedAt=datetime.now(timezone.utc),
-            stale=False
-        )
-    ]
-
-    # Format grounded response from excerpt
-    if lang == "hi":
-        answer = f"सत्यापित स्रोत ({best_doc['title']}) के अनुसार:\n\n{excerpt}"
-    else:
+    # Fallback to grounded search excerpt if LLM was unavailable
+    if hits and hits[0][1] >= 0.8:
+        best_doc, score, excerpt = hits[0]
+        sources = [
+            Source(
+                docId=best_doc["doc_id"],
+                title=best_doc["title"],
+                url=best_doc["url"],
+                excerpt=excerpt,
+                fetchedAt=datetime.now(timezone.utc),
+                stale=False,
+            )
+        ]
         answer = f"Based on verified municipal records ({best_doc['title']}):\n\n{excerpt}"
+        SESSION_HISTORY[session_key].append({"role": "user", "content": request.message})
+        SESSION_HISTORY[session_key].append({"role": "assistant", "content": answer})
+        return AgentResponse(
+            sessionId=session_id,
+            messageId=message_id,
+            status="ANSWERED",
+            answer=answer,
+            agent=AgentInfo(id=agent_id, name=agent_name),
+            sources=sources,
+            cta="report_issue",
+            served="fallback",
+            **plan_fields,
+        )
 
+    # Soft, helpful civic fallback
+    fallback_msg = (
+        "देहरादून नगर निगम में नागरिक सेवाओं के लिए आप सीधे शिकायत दर्ज कर सकते हैं या नागरिक हेल्पलाइन पर संपर्क कर सकते हैं:\n\n"
+        "• **नागरिक शिकायत:** सड़क के गड्ढे, कचरा, स्ट्रीट लाइट या नाली की समस्या दर्ज करें\n"
+        "• **हेल्पलाइन:** 1800-180-4107 या 0135-2653572\n"
+        "• **कार्यालय:** नगर निगम मुख्यालय, क्लॉक टॉवर के पास, देहरादून (प्रातः 10 बजे से सायं 5 बजे तक)"
+        if lang == "hi"
+        else
+        "For civic assistance in Dehradun, you can lodge a grievance, check alerts, or reach out directly to Nagar Nigam Dehradun:\n\n"
+        "• **File a Grievance:** Report potholes, sanitation waste, dark streetlights, or drainage issues\n"
+        "• **Citizen Toll-Free Helpline:** 1800-180-4107 or 0135-2653572\n"
+        "• **Municipal Office:** Nagar Nigam Complex, near Clock Tower, Dehradun (Open 10:00 AM – 5:00 PM)"
+    )
+    SESSION_HISTORY[session_key].append({"role": "user", "content": request.message})
+    SESSION_HISTORY[session_key].append({"role": "assistant", "content": fallback_msg})
     return AgentResponse(
         sessionId=session_id,
         messageId=message_id,
         status="ANSWERED",
-        answer=answer,
+        answer=fallback_msg,
         agent=AgentInfo(id=agent_id, name=agent_name),
-        sources=sources,
-        cta=None,
-        served="fallback"
+        sources=[],
+        cta="report_issue",
+        served="fallback",
+        **plan_fields,
     )
 
 
-def offline_confirm_action(principal: Principal, token: str) -> ConfirmResponse:
+async def offline_confirm_action(principal: Principal, token: str) -> ConfirmResponse:
     action = PENDING_ACTIONS.get(token)
-    if not action:
+    if not action or action.get("user_id") not in (None, principal.user_id):
         return ConfirmResponse(status="rejected", detail="Action is invalid, expired, or already used")
     if action["status"] != "pending":
         return ConfirmResponse(status="rejected", detail=f"Action is already {action['status']}")
     if action["expires_at"] <= datetime.now(timezone.utc):
         action["status"] = "expired"
         return ConfirmResponse(status="rejected", detail="Action has expired")
+
+    from src.config import settings
+
+    if settings.complaint_service_url and action.get("args"):
+        # Claim first so a double-tap cannot file twice, then file into the complaint module.
+        action["status"] = "executing"
+        try:
+            from src.agent.tools import execute_complaint
+
+            result = await execute_complaint(action["args"], token, principal.user_id)
+        except Exception:
+            action["status"] = "failed"
+            return ConfirmResponse(status="failed", detail="Complaint service unavailable; please retry later")
+        action["status"] = "executed"
+        action["result_ref"] = result["trackingId"]
+        return ConfirmResponse(status="executed", result=result)
 
     # Generate realistic tracking ID
     tracking_id = f"NND-2026-{secrets.randbelow(9000) + 1000}"

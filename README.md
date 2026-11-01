@@ -159,20 +159,21 @@ CitySense/
 ├── agent_service/                      # [Member B] Multilingual AI Agent & RAG Service (Python 3.11)
 │   ├── src/                            # FastAPI app, RAG pgvector pipeline, Sarvam STT/TTS
 │   ├── scripts/                        # Seed, bootstrap & provider verification
-│   ├── eval/                           # RAG evaluation benchmark
-│   └── UI.html                         # Interactive Ask Tab & Citizen Voice Assistant UI
+│   └── eval/                           # RAG evaluation benchmark
 │
 ├── complaint_module/                   # [Member C] Civic Services & Escalation Engine (Python 3.11)
 │   ├── app/                            # FastAPI, LangGraph StateGraph, LLM router & coordinator
 │   ├── data/                           # Authorities JSON, citizen profile, workers matrix
-│   ├── static/UI.html                  # Blue & white escalation dashboard with live telemetry bus
-│   └── test_pipeline.py                # 8-test automated verification suite
+│   └── test_pipeline.py                # Automated verification suite
 │
 ├── emergency_routing/                  # [Member D] Intelligent Mobility & Emergency Routing (Python 3.11)
 │   ├── models/                         # YOLOv8 accident & feud CV detectors, vision pipeline
 │   ├── routing/                        # NetworkX arrival-time graph & dwell-time hysteresis
-│   ├── agents/                         # LangGraph emergency & ambulance dispatch agents
-│   └── ui.html                         # Live map, video inference feed & route commitment UI
+│   └── agents/                         # LangGraph emergency & ambulance dispatch agents
+│
+├── dashboard/                          # React + Vite operations dashboard (live twin, RL Policy Lab, agents, services)
+├── city_sim/                           # LangGraph people-cluster agents on local Gemma -> car clusters in the twin
+├── residuals/                          # Retired single-file UI.html pages (reference only)
 │
 └── docs/                               # Architecture blueprints, member guides & slide decks
     ├── MEMBER_A_PLATFORM.md            # Member A verification and platform report
@@ -181,6 +182,21 @@ CitySense/
 ```
 
 ---
+
+## 🖥️ Operations dashboard & digital twin
+
+`dashboard/` (React + Vite, built from `docs/dashboard.jpeg`) shows everything happening in the simulated city:
+
+* **Digital twin + RL:** the CTM corridor from the sibling repo `../CITY SENSE RL` runs live (`scripts/serve_twin.py`, port 8003). A Double DQN learns online and drives the signals, while fixed-time, longest-queue and max-pressure run in lockstep on identical demand. Every signal decision is logged with explore / exploit / shield mode, Q-values and feature attributions. See `CITY SENSE RL/docs/live_twin.md`.
+* **Population agents:** `city_sim/` (port 8004) runs one LangGraph agent per people cluster on local Gemma-4-E2B (llama-server, port 8090). The agents choose categorical travel plans; code turns those plans into car clusters that drive through the twin and wait at the RL-controlled signals.
+* **City services:** complaints (TownHall), emergency missions (Tickets) and voice-agent events (Messages).
+
+```bash
+./run_backends.sh start     # agent 8000, complaints 8001, emergency 8002, twin 8003, Gemma 8090, agents 8004, dashboard 5173
+open http://localhost:5173
+```
+
+All twin numbers are simulated (CTM), not field data. The old per-service `UI.html` pages are in `residuals/`.
 
 ## 📱 Mobile app (`mobile/`)
 
@@ -208,13 +224,18 @@ React Native (Expo SDK 58, Expo Router, MapLibre) citizen app built from `UI.jpe
 ### 2. Environment Setup
 ```bash
 cp .env.example .env
-# Edit .env with your database credentials and optional API keys (SARVAM_KEY, LLM_KEY)
+./scripts/gen-secrets.sh .env   # strong DB password + JWT secret
+# Edit .env: SARVAM_API_KEY (speech), GROQ_API_KEY (LLM), optional SMTP
 ```
 
 ### 3. Launch Services with Docker Compose
 ```bash
-docker compose up -d postgres-postgis
-# Start the full stack or individual components as documented in plan.md
+docker compose up -d postgres-postgis   # database only (run core / Python services locally)
+docker compose up -d --build            # full stack behind Caddy on :80 (see docs/DEPLOYMENT.md)
+./run_backends.sh start                 # Python services (8000/8001/8002) from the local .venv
 ```
+
+Production deployment, public routes, the end-to-end voice → plan → action flow and known limits:
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 For complete technical specifications, API contracts, entity schemas, and day-by-day schedules, refer to [plan.md](plan.md).

@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://localhost:5432/citysense"
     jwt_secret: SecretStr = SecretStr("")
     jwt_algorithm: Literal["HS256"] = "HS256"
+    # Core (jjwt) picks HS256/384/512 from the secret length; accept all HMAC variants on decode.
+    jwt_accepted_algorithms: list[str] = Field(default_factory=lambda: ["HS256", "HS384", "HS512"])
     jwt_issuer: str | None = None
     jwt_audience: str | None = None
     embed_model: str = "intfloat/multilingual-e5-small"
@@ -63,6 +65,13 @@ class Settings(BaseSettings):
     emergency_corridor_url: str | None = None
     user_complaints_url: str | None = None
     adapter_api_key: SecretStr | None = None
+    # Downstream CitySense services (unset = clearly-labelled sample data is served instead).
+    complaint_service_url: str | None = None  # complaint_module, e.g. http://complaint-module:8001
+    emergency_service_url: str | None = None  # emergency_routing, e.g. http://emergency-routing:8002
+    core_service_url: str | None = None  # Spring Boot core, e.g. http://core:8080
+    public_data_apis: bool = False  # opt-in Nominatim geocoding + Open-Meteo air quality
+    nominatim_url: str = "https://nominatim.openstreetmap.org"
+    geo_user_agent: str = "CitySense-Agent/1.0 (+https://github.com/Adityakeerti/CitySense)"
     cors_origins: list[str] = Field(default_factory=list)
     refresh_allowed_domains: list[str] = Field(default_factory=list)
     refresh_interval_seconds: int = Field(default=3600, ge=60)
@@ -106,6 +115,10 @@ class Settings(BaseSettings):
         "traffic_density_url",
         "emergency_corridor_url",
         "user_complaints_url",
+        "complaint_service_url",
+        "emergency_service_url",
+        "core_service_url",
+        "nominatim_url",
     )
     @classmethod
     def endpoint_url(cls, value: str | None) -> str | None:

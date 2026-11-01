@@ -91,7 +91,7 @@ public class AvatarService {
      * Quick-prompt intents are answered from the avatar's own record so they never drift from the
      * data shown on screen; free text goes to the avatar's agent persona.
      */
-    @Transactional(readOnly = true)
+    // Not @Transactional: the agent call can take seconds and must not hold a pooled DB connection.
     public AvatarChatResponse chat(AuthUser user, UUID id, AvatarChatRequest req) {
         requireVerified(user);
         Avatar a = load(id);
@@ -112,13 +112,21 @@ public class AvatarService {
         if (req.message() == null || req.message().isBlank()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Provide a message or an intent");
         }
-        AgentDtos.ChatResponse r = agent.respond(
-                new AgentDtos.ChatRequest(req.message(), a.getPersona(), lang, session));
-        return new AvatarChatResponse(r.sessionId(), r.reply(), null, null, r.sources(), r.timestamp());
+        // Only forward a client-held session id; a fresh conversation lets the agent mint one.
+        String clientSession = req.sessionId() == null || req.sessionId().isBlank() ? null : req.sessionId();
+        // The avatar answers as a local area agent; agent_service hands emergencies/complaints to the main agent.
+        AgentDtos.ChatResponse r = agent.respondLocal(
+                new AgentDtos.LocalAvatar(a.getHandle(), a.getName(), a.getTitle(), a.getPersona(), a.getCategory(),
+                        a.getIntro(), a.getLatitude(), a.getLongitude()),
+                new AgentDtos.ChatRequest(req.message(), a.getPersona(), lang, clientSession, req.latitude(),
+                        req.longitude()));
+        return new AvatarChatResponse(r.sessionId(), r.reply(), null, null, r.sources(), r.timestamp(),
+                r.status(), r.plan(), r.pendingAction(), r.actionData());
     }
 
     private AvatarChatResponse answer(String session, String text, ChatIntent intent, String link) {
-        return new AvatarChatResponse(session, text, intent, link, List.of(), Instant.now());
+        return new AvatarChatResponse(session, text, intent, link, List.of(), Instant.now(), "ANSWERED",
+                null, null, null);
     }
 
     private ToggleResponse toggle(AuthUser user, UUID id, boolean on, String table) {

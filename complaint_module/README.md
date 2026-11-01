@@ -145,7 +145,21 @@ Serves normalized JSON feed ready for future Spring Boot backend ingestion (`com
 }
 ```
 
-### E. Interactive Blue & White UI (`static/UI.html`)
+### D2. Govt portal & mobile app integration (no database)
+This module is the shared, JSON-backed hub between the citizen mobile app and the state govt portal (`govt_portal/`, static site):
+
+| Endpoint | Used by | Purpose |
+| :--- | :--- | :--- |
+| `GET /api/complaints`, `GET /api/complaints/{id}` | mobile app, govt portal | Complaints filed from the app (form + voice agent) |
+| `POST /api/complaints` (multipart) | mobile app, govt portal | File as the demo citizen; intake agent assigns dept + priority |
+| `POST /api/complaints/{id}/escalate-tick`, `/resolve` | govt portal | Officer actions |
+| `GET /api/meta` | mobile app, govt portal | Escalation ladder: `statuses[i]` is level `i` |
+| `GET /api/notices?limit=&include_expired=` | mobile app feed, govt portal | Notices, newest first; expired ones hidden by default |
+| `POST /api/notices`, `DELETE /api/notices/{id}` | govt portal | Publish / revoke a notice |
+
+Notices are stored in `$COMPLAINT_STATE_DIR/notices.json` (default `data/`). Publishing has **no authentication yet** (demo only): anyone who can reach port 8001 can publish or revoke a notice. Add publisher auth before exposing this beyond a trusted network.
+
+### E. Interactive Blue & White UI (retired: now `residuals/complaint_module.UI.html`; use the React dashboard's TownHall page)
 - Simple, clean municipal blue (`#1d4ed8`) and white theme (not vibecoded).
 - **Features:**
   - Photo upload with live preview and quick sample buttons.

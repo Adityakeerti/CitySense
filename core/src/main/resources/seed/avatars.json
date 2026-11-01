@@ -43,8 +43,8 @@
       "heroImage": "meera.png",
       "rating": 4.9,
       "reviewCount": 143,
-      "latitude": 30.3243,
-      "longitude": 78.0405
+      "latitude": 30.329,
+      "longitude": 78.048
     },
     {
       "handle": "ravi",
@@ -58,8 +58,8 @@
       "heroImage": "ravi.png",
       "rating": 4.6,
       "reviewCount": 75,
-      "latitude": 30.3330,
-      "longitude": 78.0530
+      "latitude": 30.348,
+      "longitude": 78.062
     },
     {
       "handle": "asha",
@@ -73,8 +73,8 @@
       "heroImage": "asha.png",
       "rating": 4.4,
       "reviewCount": 120,
-      "latitude": 30.3186,
-      "longitude": 78.0345
+      "latitude": 30.317,
+      "longitude": 78.059
     },
     {
       "handle": "kabir",

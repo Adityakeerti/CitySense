@@ -1,289 +1,456 @@
-# CITY SENSE: Implementation Plan
+# CITY SENSE: Comprehensive Agentic Architecture & Implementation Plan
+> **Target Audience:** Engineering Team & Autonomous Coding Agents (Claude / Antigravity)  
+> **Mission:** Production-grade Smart City Platform with Multilingual Voice Agent (STT/TTS), Integrated Planner, Hierarchical Multi-Agent Tool Execution, and 1-Hour Hosting Blueprint.
 
-**One app for everything happening in the city, from fun to fixes.** Mobile app (citizens + emergency crew) and Admin web dashboard. Team of 4, 14 days.
+---
 
-Merges three ideas: **City Sense** (agents, coordinator, civic, complaints), **Indent Error** (YOLOv8 density, DQN signals, green corridor) and **NavaBharataya** (multilingual avatar, RAG, geo-awareness).
+## 1. Executive Summary & Core Invariants
 
-## 1. Goal and success
+CitySense is an integrated civic AI platform uniting:
+1. **Citizen Mobile App (React Native / Expo)**: Interactive civic map, service avatars, citizen grievances, and voice assistant with speaker mute controls.
+2. **Main Voice Agent & Dynamic Planner (Port 8000)**: Sarvam AI STT (`saaras:v3`) & TTS (`bulbul:v3`), input safety guardrails, scope classification, and dynamic step-by-step execution planner.
+3. **Specialized Sub-Agents**: Domain specialists executing strictly scoped Standard Operating Procedures (SOPs).
+4. **Autonomous LangGraph Microservices**: Port 8001 (Civic complaint SLA escalation) and Port 8002 (CCTV vision, feud/accident triage, green-wave corridor preemption).
+5. **Spring Boot Gateway (Port 8080)**: PostGIS spatial engine, JWT authentication, geofencing, and unified proxy seam.
 
-- **Hero feature:** a multilingual city agent that answers from verified knowledge, cites its source, and abstains when it does not know.
-- **Everything real:** live map + events + complaints + admin approvals, YOLOv8 density, DQN signal control (SUMO), RAG + Sarvam agent, predictive emergency routing.
-- **Approach:** sequenced with fallbacks. Every feature ships a working fallback first, then the live version replaces it only when it passes its acceptance test. Nothing is cut; nothing can break the demo.
-- **Resume angle:** all four members own a dedicated Spring Boot module and an end-to-end visible vertical (Platform & Governance, Multilingual Agent & RAG, Civic & Escalation, Mobility & Traffic AI).
+### The 3 Core Architectural Invariants
 
-## 2. Ground rules (humans and AI agents)
+> [!IMPORTANT]
+> **Invariant 1: Planner Belongs ONLY to the Main Voice Agent**  
+> The Dynamic Planner is integrated exclusively into the Main Voice Agent. Sub-agents do not create arbitrary plans; they execute domain SOPs deterministically.
 
-1. **Contracts before code.** Spring Boot is the only public API. Its OpenAPI spec generates TypeScript types for mobile and dashboard. The Python internal spec generates the Java client. Never invent an endpoint or field; change the contract first.
-2. **One event model.** Every observation (CV density, complaint, flood report, agent finding) is an `Observation` in one store.
-3. **Spring is the gateway.** Mobile and dashboard never call Python directly.
-4. **Adapters with cached fallbacks** for every external dependency (Sarvam, LLM, SUMO, YOLO, maps). `DEMO_MODE=1` must run the full demo with the network off.
-5. **High-impact actions need admin approval** (signal override, road closure, dispatch, evacuation). Low-risk notifications may auto-run. Every approval and rejection goes to the `AuditLog`.
-6. **Label honestly:** `SIMULATED`, `PREDICTED`, `STALE`, `UNVERIFIED` badges in the UI. Never claim live access to real cameras, signals or dispatch.
-7. Small branches, one feature each. Tests for anything with logic: routing hysteresis, escalation, RAG abstain, coordinator rules.
-8. Secrets only in `.env`; keep `.env.example` current.
+> [!IMPORTANT]
+> **Invariant 2: Strict Delegation & Non-Duplication of Tool Calls**  
+> When the Planner assigns a task to a specialized Sub-Agent (e.g. ComplaintAgent, EmergencyAgent), the **Sub-Agent is the sole caller of its domain tools**. The Main Voice Agent **NEVER** calls a tool if another agent is assigned to execute it. The Main Voice Agent directly calls tools **only** when it is the direct executor of a cross-cutting utility tool.
 
-## 3. Product scope
+> [!IMPORTANT]
+> **Invariant 3: Bi-directional Voice with Speaker Mute Option**  
+> Speech input flows via microphone through Sarvam STT. Audio output is synthesized via Sarvam TTS (24kHz WAV). The client UI **must** provide a persistent **Speaker Mute / Unmute toggle** so citizens can listen or read in silence at will.
 
-### 3.1 Mobile app (React Native / Expo)
+---
 
-| Tab | What it does |
-|---|---|
-| **Explore** | Live city map and feed: events (fun) and raised issues (fixes), filters, "near me" geofence cards |
-| **Ask** (hero) | City agent: text + voice, multilingual, cites sources, abstains if unsure, specialist personas (Civic, Traffic, Emergency, Transit) |
-| **Report** | Raise an issue with photo, category and geo-tag; get a tracking ID |
-| **Track** | Complaint timeline with the escalation ladder |
-| **Alerts** | Emergency vehicle alerts ("clear the lane"), road-risk warnings; crew mode shows route and ETA |
+## 2. Voice Pipeline Architecture (STT & TTS)
 
-### 3.2 Admin web dashboard (React + Vite)
-
-- Live map: incidents, ambulances, cameras, junctions, with the agent activity panel
-- **Approval queue** and audit log
-- Complaints board: assign, escalate, resolve; escalation monitor
-- Events CRUD: publish city events
-- Traffic panel: YOLO density per junction, signal state, RL policy vs fixed-time baseline
-- Knowledge base manager: upload and verify documents for the agent
-- Scenario control panel: inject flood, crash, congestion, complaint (for demos)
-
-## 4. Architecture
-
-```text
- Mobile (Expo)        Admin (Vite)
-        \                /
-         \  REST + STOMP/
-          v              v
-   +-----------------------------------------------+
-   |        SPRING BOOT CORE (public API)          |   Java 21, Postgres + PostGIS (owns schema)
-   |  M1: platform | M2: agent | M3: civic | M4: mobility  |   JWT auth, events, complaints, escalation,
-   |  coordinator, approvals, audit, WebSocket     |
-   +-----------------------------------------------+
-          |  REST (internal)  ^ POST /internal/observations
-          v                   |
-   +-----------------------------------------------+
-   |         PYTHON ai-service (FastAPI)           |   RAG + Sarvam agent, YOLOv8 density,
-   |         M2: agent | M4: cv, routing, rl       |   NetworkX routing, SUMO + DQN
-   +-----------------------------------------------+
+```mermaid
+flowchart LR
+    Mic["🎙️ Mobile / Web Mic"] -->|WAV / M4A / WebM| STTRouter["POST /api/agent/voice"]
+    STTRouter --> STTLogic["transcribe_with_fallback()"]
+    
+    subgraph STTEngine["STT Provider Cascade"]
+        STTLogic -->|1. Primary| SarvamSTT["Sarvam AI (saaras:v3)<br/>Multilingual Hindi / Hinglish / English"]
+        STTLogic -->|2. Fast Failover| GroqSTT["Groq (whisper-large-v3)<br/><500ms latency"]
+        STTLogic -->|3. Air-Gapped| LocalSTT["Local Whisper C++"]
+    end
+    
+    SarvamSTT --> TranscribedText["Transcribed Text + Language Code ('hi' / 'en')"]
+    TranscribedText --> MainVoiceAgent["🧠 Main Voice Agent & Planner"]
+    MainVoiceAgent --> AgentResponse["Agent Answer + Plan Steps + Action Token"]
+    
+    AgentResponse --> TTSRouter["POST /api/agent/tts"]
+    TTSRouter --> TTSLogic["synthesize_speech()"]
+    
+    subgraph TTSEngine["TTS Engine"]
+        TTSLogic --> SarvamTTS["Sarvam AI (bulbul:v3)<br/>Speakers: aditya (m), ritu (f), etc."]
+    end
+    
+    SarvamTTS --> AudioWav["24kHz WAV Binary Stream"]
+    AudioWav --> SpeakerToggle{"Speaker Mute Toggle"}
+    SpeakerToggle -->|Unmuted| DeviceSpeaker["🔊 Audio Playback"]
+    SpeakerToggle -->|Muted| SilentText["💬 Visual Card Only"]
 ```
 
-**Split of responsibility**
+### File References & Contracts
+- **Provider Implementation**: [`Project/agent_service/src/providers/speech.py`](file:///home/aditya/Desktop/STUDY/SmartCity/Project/agent_service/src/providers/speech.py)
+- **STT Endpoint**: `POST /api/agent/voice` (multipart form `file`, optional `language`)
+- **TTS Endpoint**: `POST /api/agent/tts` (`{"text": str, "language": "hi"|"en", "speaker": "aditya"|"ritu"}`)
 
-| Spring Boot (deterministic, auditable) | Python ai-service (model and simulation heavy) |
-|---|---|
-| Auth, users, roles | RAG retrieval and answer generation |
-| Observations, incidents, coordinator rules | Sarvam STT / TTS / translation |
-| Complaints and escalation scheduler | YOLOv8 grid-occupancy density |
-| Approval queue, audit log | Route prediction, committed route, hysteresis |
-| Feed, geofence, notifications | SUMO environment and DQN training |
-| WebSocket broadcast, API gateway | Agent persona prompts and retrieval tools |
+---
 
-**Flow:** clients call Spring. Spring calls Python for AI tasks (circuit breaker + cached fallback). Python pushes new observations (e.g. CV density) to `POST /internal/observations`. Spring stores them and broadcasts over STOMP.
+## 3. Main Voice Agent & Integrated Dynamic Planner
 
-## 5. Stack
+The Main Voice Agent acts as the front-line civic concierge. It listens to the citizen, creates an execution plan, delegates to sub-agents, and communicates back in natural speech.
 
-| Layer | Choice | Notes |
-|---|---|---|
-| Mobile | React Native + Expo (Expo Router), TypeScript | Shares types with dashboard |
-| Admin | React + Vite + TypeScript, MapLibre GL, Recharts | |
-| Core backend | **Spring Boot 3, Java 21, Maven** | Spring Web, Data JPA + Hibernate Spatial, Security (JWT), WebSocket (STOMP), springdoc-openapi, Flyway, Resilience4j, Testcontainers |
-| AI service | Python, FastAPI | Internal only |
-| Database | PostgreSQL + PostGIS + pgvector | Spring owns schema (Flyway); RAG tables in separate `ai` schema |
-| Routing | NetworkX on an OSM extract of Dehradun (osmnx, cached to disk) | |
-| CV | YOLOv8 (ultralytics) + OpenCV | Grid occupancy per lane |
-| RL / sim | SUMO + TraCI, DQN (stable-baselines3 or custom) | |
-| Agent | RAG on pgvector; LLM behind one `LLMClient`; Sarvam for STT/TTS/translation | Verify Sarvam quotas and language list on day 1 |
-| Deploy | Docker Compose: core, ai-service, db, dashboard; Expo Go / dev build for mobile | |
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Citizen as 👤 Citizen
+    participant Client as 📱 Mobile / Web UI
+    participant MainAgent as 🧠 Main Voice Agent (Port 8000)
+    participant Planner as 📋 Dynamic Execution Planner
+    participant SubAgent as 🤖 Specialized Sub-Agent
+    participant Tools as ⚙️ Domain Tools
+    participant TTS as 🔊 Sarvam TTS
 
-## 6. Repository layout
-
-```text
-citysense/
-  contracts/              # openapi-public.yaml, openapi-internal.yaml, event.schema.json
-  core/                   # Spring Boot (Java 21, Maven)
-    src/main/java/com/citysense/
-      platform/           # [M1: Platform Lead] auth, observations, incidents, coordinator, audit, websocket
-      agent/              # [M2: Agent Lead] gateway to ai-service, knowledge docs, chat sessions, tool bridge
-      civic/              # [M3: Civic Lead] feed, city-events, complaints, escalation, geofence
-      mobility/           # [M4: Mobility Lead] emergency routes API, actions/approvals, traffic telemetry
-      common/             # shared config, errors, adapters (fallback caches)
-    src/main/resources/db/migration/   # Flyway (V1__platform, V2__agent, V3__civic, V4__mobility)
-    src/test/
-  ai-service/             # FastAPI (Internal AI / ML Service)
-    app/agent/            # [M2] rag.py, abstain_policy.py, personas, sarvam_client.py, llm_client.py
-    app/cv/               # [M4] yolo_density.py, grid_occupancy.py, sample_videos/
-    app/routing/          # [M4] graph.py, forecast.py, commit_policy.py
-    app/rl/               # [M4] sumo_env/, dqn_train.py, policy_replay.py
-    tests/
-  mobile/                 # React Native + Expo (Expo Router)
-    app/(tabs)/
-      index.tsx           # [M3] Explore (Feed & Map)
-      ask.tsx             # [M2] Ask (Multilingual Hero Agent)
-      report.tsx          # [M3] Report (Complaints with photo)
-      track.tsx           # [M3] Track (Escalation timeline)
-      alerts.tsx          # [M4] Alerts (Crew route & clear-the-lane)
-  dashboard/              # React + Vite + TypeScript
-    src/features/
-      platform/           # [M1] live map, scenario control panel, approval queue, audit log
-      agent/              # [M2] knowledge base manager, agent activity panel
-      civic/              # [M3] complaints board, events CRUD
-      mobility/           # [M4] traffic panel, YOLO feed, RL policy chart
-  docker-compose.yml
-  .env.example
-  README.md
+    Citizen->>Client: Taps Mic & Speaks ("राजपुर रोड पर एक्सीडेंट हुआ है, तुरंत एम्बुलेंस भेजो")
+    Client->>MainAgent: Voice Audio -> STT Transcription
+    MainAgent->>MainAgent: Input Guardrail Safety & Scope Classification (CIVIC_EMERGENCY)
+    MainAgent->>Planner: Generate Implementation Plan
+    Planner-->>MainAgent: Plan: [1. EmergencySpecialist -> Triage & Dispatch, 2. Corridor Preemption]
+    
+    critical Strict Delegation Barrier
+        MainAgent->>SubAgent: Invoke EmergencySpecialist.execute(message, context)
+        Note over MainAgent: Main Agent DOES NOT call emergency tools directly!
+        SubAgent->>Tools: dispatch_emergency_team(hospital="Doon Hospital", severity="P0")
+        SubAgent->>Tools: get_emergency_corridor(origin="Rajpur Rd", destination="Doon Hospital")
+        Tools-->>SubAgent: Dispatched Mission #EMG-902 + Green Wave Active
+        SubAgent-->>MainAgent: SubAgentResult(status="DISPATCHED", steps=[...], cta="track_mission")
+    end
+    
+    MainAgent->>TTS: Synthesize Spoken Reply
+    TTS-->>Client: WAV Audio Stream
+    MainAgent-->>Client: AgentResponse(plan, answer, cta, tracking_data)
+    Client->>Citizen: 🔊 Speaks Status (if unmuted) + 📱 Displays Live Mission Card
 ```
 
-## 7. Data model (owned by Spring, Flyway)
+---
 
-| Entity | Key fields |
-|---|---|
-| `Observation` | id, type, location, observed_at, source, confidence, status, payload |
-| `Incident` | id, type, severity, location, status, created_at, observation_ids |
-| `CityEvent` | id, title, category, location, starts_at, ends_at, published_by |
-| `Complaint` | id, tracking_id, category, description, location, photo_url, status, level, warnings, assignee |
-| `EscalationStep` | id, complaint_id, level, action, at, reason |
-| `RoutePlan` / `RouteDecision` | plan: vehicle, edge_ids, predicted_eta, confidence, committed_at. decision: reason, old/new ETA, evidence_ids |
-| `AgentAction` | id, incident_id, agent, action_type, payload, risk_level, approval_status |
-| `KnowledgeDoc` / `KnowledgeChunk` | doc: title, source, verified. chunk: text, embedding (`ai` schema) |
-| `User` | id, role (citizen / admin / crew), language |
-| `AuditLog` | id, actor, action, timestamp, evidence, outcome |
+## 4. Complete 27-Tool Catalog & Ownership Matrix
 
-Observation types: `cv_density`, `complaint`, `flood`, `crash`, `event`, `agent_finding`.
+Every tool in the platform has a **single unambiguous owner**. The Main Voice Agent never executes a tool assigned to a Sub-Agent.
 
-## 8. Key designs
+```mermaid
+classDiagram
+    class MainVoiceAgent {
+        +verify_citizen_location()
+        +reverse_geocode_coordinates()
+        +ask_clarification()
+        +handoff_to_officer()
+        +toggle_audio_preference()
+    }
 
-### 8.1 City agent (hero)
+    class CivicComplaintSpecialist {
+        +create_complaint()
+        +get_complaint_status()
+        +list_user_complaints()
+        +escalate_complaint_sla()
+        +reassign_worker()
+        +verify_photo_evidence()
+    }
 
-1. Input text or voice. Sarvam STT, then language detection and translation to a pivot language if needed.
-2. Spring's coordinator picks a persona and forwards to `ai-service /agent/chat`.
-3. Retrieve top-k verified chunks from pgvector. The LLM answers **only** from retrieved context.
-4. Translate back and run TTS. The response includes `sources[]`.
-5. **Abstain policy:** if similarity is below a threshold or no chunk supports the answer, say "I don't have verified information on that" and offer to file a complaint. Unit-test this.
-6. **Tools the agent may request** (executed by Spring services): `get_events`, `get_complaint_status`, `create_complaint`, `get_route_eta`, `get_active_alerts`. High-impact actions are never exposed to the agent.
-7. **Languages:** start with Hindi + English + 1-2 more. Check Sarvam's supported list; do not promise 22.
-8. **Fallback:** text-only chat with cached answers for scripted demo questions.
+    class EmergencySpecialist {
+        +dispatch_emergency_team()
+        +get_emergency_corridor()
+        +override_traffic_signal()
+        +get_nearest_hospital()
+        +get_cctv_incident_feed()
+        +broadcast_safety_alert()
+    }
 
-### 8.2 Events and issues feed
+    class CityPulseSpecialist {
+        +get_active_alerts()
+        +get_events()
+        +get_traffic_density()
+        +fetch_weather_inundation()
+        +get_air_quality_index()
+        +check_water_supply_schedule()
+    }
 
-One feed merges `CityEvent`, open `Complaint` and active `Incident`, filtered by category and distance. The geofence service triggers an in-app card when the user enters a radius of an event or project.
+    class KnowledgeSpecialist {
+        +search_schemes()
+        +get_ward_councillor_info()
+        +query_municipal_by_laws()
+        +get_waste_collection_route()
+    }
 
-### 8.3 Complaints and escalation ladder
+    MainVoiceAgent --> CivicComplaintSpecialist : delegates
+    MainVoiceAgent --> EmergencySpecialist : delegates
+    MainVoiceAgent --> CityPulseSpecialist : delegates
+    MainVoiceAgent --> KnowledgeSpecialist : delegates
+```
 
-`Filed -> Worker assigned -> Warnings 1-5 (automated follow-ups) -> Ward officer -> Municipal commissioner -> CM portal`
+### Detailed Tool Specifications
 
-- Spring scheduler, rule-based (no LLM). `ESCALATION_TICK_SECONDS` compresses days to seconds in demo mode.
-- Each step writes `EscalationStep` and `AuditLog`, and notifies the citizen. The CM-portal step is **simulated**.
+#### Group A: Cross-Cutting Tools (Owned Directly by Main Voice Agent)
+1. **`verify_citizen_location`**: Geocodes informal landmarks ("near Clock Tower", "Rajpur Road Lane 4") to precise GPS lat/lng coordinates via Nominatim proxy.
+2. **`reverse_geocode_coordinates`**: Resolves GPS `(lat, lng)` to official Nagar Nigam municipal ward name and postal address.
+3. **`ask_clarification`**: Generates targeted conversational follow-up questions when required parameters are missing.
+4. **`handoff_to_officer`**: Escalates complex, sensitive, or distressed conversations to human municipal emergency concierge.
+5. **`toggle_audio_preference`**: Persists citizen voice playback preference (`auto_play: boolean`, `preferred_speaker: string`).
 
-### 8.4 Traffic: YOLO density and RL signals
+#### Group B: Civic Grievance Tools (Owned Exclusively by CivicComplaintSpecialist)
+6. **`create_complaint`**: Proposes a validated civic ticket with photographic evidence and geographic coordinates. Requires cryptographic token confirmation (`NND-xxxx`).
+7. **`get_complaint_status`**: Queries live status, assigned worker, SLA timer, and resolution history by tracking ID.
+8. **`list_user_complaints`**: Retrieves all open, pending, and resolved complaints filed by the citizen.
+9. **`escalate_complaint_sla`**: Forces an SLA level escalation to the next administrative tier (Ward Supervisor -> Junior Engineer -> Executive Officer -> Municipal Commissioner) via Port 8001.
+10. **`reassign_worker`**: Reallocates a delayed or stalled municipal complaint to a rapid-action squad.
+11. **`verify_photo_evidence`**: Validates resolution before/after photos using computer vision verification.
 
-- `yolo_density.py`: sample video, YOLOv8 detections, per-lane grid occupancy score, pushed to Spring as `cv_density` every N seconds.
-- SUMO scenario with 1-2 junctions. DQN state is queue length and occupancy per approach; action is phase selection; reward is negative waiting time. Compare against fixed-time and chart both.
-- RL results are shown as `SIMULATED`. Do not claim the DQN controls real signals.
-- **Fallback:** precomputed density JSON and a recorded SUMO run.
+#### Group C: Emergency & Public Safety Tools (Owned Exclusively by EmergencySpecialist)
+12. **`dispatch_emergency_team`**: Triggers real-time ambulance (108) or police squad dispatch with designated trauma center on Port 8002.
+13. **`get_emergency_corridor`**: Computes optimal green-wave corridor between emergency scene and hospital using A* predictive routing.
+14. **`override_traffic_signal`**: Sends green-light preemption override command to SUMO / SCATS traffic light controllers along the route.
+15. **`get_nearest_hospital`**: Locates nearest government/private hospital with Level 1 trauma care and real-time ICU bed availability.
+16. **`get_cctv_incident_feed`**: Queries live vision-detected accidents, road collapses, or public feuds from traffic surveillance streams.
+17. **`broadcast_safety_alert`**: Emits geo-fenced broadcast alerts to nearby citizens for active fires, gas leaks, or bridge closures.
 
-### 8.5 Emergency routing and green corridor
+#### Group D: City Pulse & Environmental Tools (Owned Exclusively by CityPulseSpecialist)
+18. **`get_active_alerts`**: Retrieves active emergency advisories, weather warnings, and scheduled roadworks.
+19. **`get_events`**: Queries upcoming cultural events, town hall public hearings, and civic festivals.
+20. **`get_traffic_density`**: Returns real-time junction congestion index, vehicle counts, and wait-time telemetry.
+21. **`fetch_weather_inundation`**: Telemetry check on waterlogged underpasses (e.g. Rajpur Road Underpass > 25cm) with diversion routes.
+22. **`get_air_quality_index`**: Retrieves real-time AQI, PM2.5, and PM10 metrics per municipal ward.
+23. **`check_water_supply_schedule`**: Checks Jal Sansthan pipeline water release hours and maintenance outages.
 
-- Weighted graph. Edge time is estimated at the **predicted arrival time**: baseline speed x time-of-day factor x live density x incident penalty.
-- **Committed route with hysteresis:** switch only if (a) the route is blocked or unsafe by verified evidence, or (b) an alternative beats the current route by a margin for a minimum dwell time. Log every decision with reason, ETAs, confidence and evidence.
-- Green corridor = proposed signal windows for the route's junctions, sent to the **approval queue**. On approval: simulated signal change and citizen "clear the lane" alerts.
-- **Fallback:** fixed seeded graph weights and a scripted congestion spike.
+#### Group E: Municipal Knowledge & Civic Services Tools (Owned Exclusively by KnowledgeSpecialist)
+24. **`search_schemes`**: Semantic RAG search across verified municipal citizen welfare programs and application requirements.
+25. **`get_ward_councillor_info`**: Retrieves ward councillor contact details, constituency office address, and public meeting hours.
+26. **`query_municipal_by_laws`**: Answers citizen queries on building bylaws, property tax calculation formulas, and trade licenses.
+27. **`get_waste_collection_route`**: Fetches door-to-door sanitation truck schedules and live GPS collection vehicle locations.
 
-### 8.6 Coordinator and approvals (Spring)
+---
 
-Correlates observations within a time and space window into one `Incident`, ranks urgency, merges agent findings into one timeline, and creates `AgentAction` items. Rules decide; the LLM only summarises.
+## 5. Mobile App Audio & UI Architecture
 
-## 9. API contracts
+### Component Hierarchy in `Project/mobile/src/app/avatar/[id].tsx`
 
-### 9.1 Public (Spring Boot)
+```text
+AvatarChatScreen
+├── HeroHeader (Avatar Portrait & Status)
+├── MessageThread (ScrollView)
+│   ├── UserBubble (Text + Mic badge)
+│   └── AgentBubble (Text + Citation tags + Pending Action card + Plan steps)
+├── AudioControlsBar
+│   ├── SpeakerMuteToggle (🔊 Unmuted / 🔇 Muted icon with visual state)
+│   └── WaveformAnimation (Active when recording or speaking)
+└── InputDock
+    ├── VoiceRecordButton (Hold/Tap to Record -> POST /api/agent/voice)
+    ├── TextInputField ("Type your message...")
+    └── SendButton (Icon)
+```
 
-| Area | Endpoints |
-|---|---|
-| Map and feed | `GET /api/map/features`, `GET /api/feed?lat&lng&radius&types` |
-| Events | `GET/POST /api/city-events`, `POST /api/events` (inject observation), `GET /api/incidents` |
-| Complaints | `POST /api/complaints`, `GET /api/complaints/{trackingId}`, `POST /api/complaints/{id}/escalate` |
-| Agent | `POST /api/agent/chat`, `POST /api/agent/voice`, `GET /api/agent/personas` |
-| Emergency | `POST /api/emergency/routes`, `POST /api/emergency/reassess` |
-| Traffic | `GET /api/traffic/junctions`, `GET /api/traffic/rl-report` |
-| Approvals | `GET /api/actions?status=pending`, `POST /api/actions/{id}/approve`, `POST /api/actions/{id}/reject` |
-| Admin | `POST /api/knowledge/docs`, `GET /api/audit` |
-| Realtime | STOMP endpoint `/ws`, topic `/topic/city-events` |
+### Client Audio Implementation Specifications
+1. **Audio Recording**:
+   - Use cross-platform recording. On React Native/Expo: `expo-av` (`Audio.Recording`).
+   - On Web (`ExploreMap.web.tsx` / Web fallback): `navigator.mediaDevices.getUserMedia` + `MediaRecorder`.
+   - Recording format: 16kHz or 44.1kHz mono WAV/M4A/WebM blob.
+2. **Speaker Toggle & Playback**:
+   - Store citizen preference in local storage via [`Project/mobile/src/utils/storage.ts`](file:///home/aditya/Desktop/STUDY/SmartCity/Project/mobile/src/utils/storage.ts) (`voice_auto_play_enabled`).
+   - When **Unmuted**: On receiving `AgentResponse`, client automatically invokes `POST /api/agent/tts`, receives WAV binary, and plays via `Audio.Sound.createAsync({ uri })`.
+   - When **Muted**: Client suppresses auto-playback. A small play icon appears next to the agent's message so the citizen can click to play selectively.
 
-### 9.2 Internal (Python ai-service, called only by Spring)
+---
 
-`POST /agent/chat`, `POST /agent/voice`, `POST /cv/density`, `POST /routing/plan`, `POST /routing/reassess`, `GET /rl/report`, `POST /knowledge/ingest`. Python posts observations back to Spring at `POST /internal/observations`.
+## 6. Spring Boot Gateway Proxy Seam
 
-## 10. Team split (4 feature modules)
+In [`Project/core/src/main/java/com/citysense/agent/AgentResponder.java`](file:///home/aditya/Desktop/STUDY/SmartCity/Project/core/src/main/java/com/citysense/agent/AgentResponder.java), replace the dummy keyword responder with a reactive HTTP proxy client (`RestClient` or `WebClient`):
 
-All four members are full-stack and each owns a dedicated **Spring Boot feature module**, their corresponding **client interface/UI panels**, and any **AI/algorithmic service** in their domain.
+```java
+@Component
+public class AgentResponder {
+    private final RestClient restClient;
 
-| | **Member A: Platform & Governance Lead** | **Member B: Multilingual Agent & RAG Lead** | **Member C: Civic Services & Escalation Lead** | **Member D: Mobility & Traffic AI Lead** |
-|---|---|---|---|---|
-| **Feature domain** | Core Platform, Event Ingestion, Coordinator & Audit | Hero Multilingual Agent, RAG, Voice & Knowledge | Citizen Issues, Complaints Escalation & Feed | Traffic CV, Adaptive Signals & Emergency Routing |
-| **Spring Boot module** | `platform` (auth/JWT, `Observation` ingestion, `Incident` correlation engine, coordinator rules, `AgentAction` approvals, `AuditLog`, WebSocket `/ws` STOMP broadcast) | `agent` (gateway to `ai-service /agent/*`, knowledge doc manager `/api/knowledge/docs`, chat sessions, tool-execution bridge for complaints/events) | `civic` (city events CRUD, complaints CRUD with image upload & tracking ID, automated escalation scheduler, PostGIS geofence queries) | `mobility` (emergency routes API `/api/emergency/routes`, route reassessment, green corridor proposals, traffic junction telemetry `/api/traffic/*`) |
-| **Python / AI service** | Scenario injector script (flood, crash, rain demo triggers) | `ai-service/app/agent/` (RAG on pgvector, strict abstain policy, Sarvam STT/TTS & translation, specialist personas) | Synthetic civic test fixtures & spatial seed data | `ai-service/app/cv/` (YOLOv8 lane grid density), `app/routing/` (NetworkX arrival-time routing + dwell-time hysteresis), `app/rl/` (SUMO + TraCI DQN) |
-| **Mobile app (Expo)** | App shell, navigation framework, auth/profile screen, global alert banner & WebSocket listener | **Ask tab (hero feature):** multilingual voice/text chat, waveform audio recorder, source citations (`sources[]`), abstain CTA modal | **Explore, Report, Track tabs:** live map & geofenced cards, photo report form with GPS picker, interactive escalation timeline | **Alerts / Crew mode tab:** emergency crew routing view, dynamic polyline & ETA, citizen "Clear the Lane" green corridor pop-up alert |
-| **Admin dashboard (Vite)** | Live operations map, Scenario control panel, Approval queue (`/api/actions`), Audit log inspector | Knowledge base manager (PDF/FAQ ingest & verification), Agent activity & confidence monitor panel | Complaints board (Kanban/table, assignment, fast-forward demo trigger), City events publisher CRUD | Traffic & Mobility panel (YOLO camera grid overlay, junction signal controls, DQN vs fixed-time comparison chart) |
-| **Resume headline** | *Spring Boot Core Platform + Distributed Event Correlation Engine + Human-in-the-Loop Governance + Real-time WebSocket STOMP* | *Enterprise RAG Architecture (pgvector) + Strict Abstain Guardrails + Multilingual Voice Agent (Sarvam AI) + Spring Resilience4j Gateway* | *Automated State Machine & Escalation Scheduler (Spring Scheduler) + Spatial PostGIS Geofencing + Citizen Civic Workflow* | *Computer Vision Traffic Telemetry (YOLOv8) + Reinforcement Learning Traffic Optimization (SUMO + DQN) + Hysteresis-Stabilized Emergency Routing* |
+    public AgentResponder(@Value("${citysense.agent.service-url:http://localhost:8000}") String agentUrl) {
+        this.restClient = RestClient.builder().baseUrl(agentUrl).build();
+    }
 
-**Collaboration & shared-file rules:**
-1. **Module ownership:** Each member has complete ownership of their package in `core/src/main/java/com/citysense/<module>/` and their corresponding client/dashboard feature directories.
-2. **Contracts & baseline:** Member A maintains the core OpenAPI contract baseline (`/contracts`) and initial DB baseline (`V1__platform.sql`). Members B, C, and D add feature-specific Flyway migrations (`V2__agent.sql`, `V3__civic.sql`, `V4__mobility.sql`) and submit contract PRs to A.
-3. **Hard gate (day 4):** Member A delivers the Spring Boot spine with database, auth, and WebSocket event bus. Members B, C, and D connect their stubbed endpoints and UI components to this spine by end of day 4.
+    public AgentDtos.ChatResponse respond(AgentDtos.ChatRequest req) {
+        // Forward request payload directly to agent_service (Port 8000)
+        // Parse AgentResponse and map into Core ChatResponse DTO with verified citations
+    }
+}
+```
 
-## 11. Timeline (14 days) with fallbacks
+---
 
-| Days | Goal | Done when | Fallback in place |
-|---|---|---|---|
-| **1-2** | **Scaffold & contracts:** monorepo, Docker Compose (core, ai-service, db), OpenAPI contracts. Member A: Spring spine, Flyway V1, JWT stub, STOMP. Member B: RAG schema, FastAPI `/agent/chat` stub. Member C: Civic tables & CRUD stubs. Member D: OSM road graph & CV/RL stubs. | `docker compose up` starts clean; STOMP test event received by Expo & Vite clients | Stubs & mock JSON |
-| **2-4** | **Core spine (hard gate day 4):**<br>• A: Incident engine, scenario injector, dashboard map shell<br>• B: Grounded RAG retrieval with citations & abstain stub, Ask tab text UI<br>• C: Complaint filing + tracking ID, events CRUD, Report & Explore tabs<br>• D: NetworkX shortest path with arrival time, YOLOv8 video frame loader | Flood injected -> appears on both clients over STOMP; grounded Q&A works; complaint filed & tracked | Seeded data; cached answers |
-| **5-6** | **Voice, escalation & routing:**<br>• A: Approval workflow & AuditLog persistence<br>• B: Sarvam voice STT/TTS & Hindi/English audio round trip in Ask tab<br>• C: Automated escalation scheduler (`ESCALATION_TICK_SECONDS`), PostGIS geofence alerts<br>• D: Routing hysteresis (switch threshold & dwell time), mobile crew route view | Hindi voice question gets cited answer; complaint auto-escalates in demo mode; route resists minor spike | Text-only chat; scripted escalation; fixed graph weights |
-| **7-9** | **Corridor, tools & simulation:**<br>• A: Multi-observation coordinator rules (correlates rain + flood + traffic)<br>• B: Agent tool execution (querying complaints/events via Spring) & source pill badges<br>• C: Multi-tier escalation ladder (warnings 1-5, ward, commissioner, CM portal simulation)<br>• D: Green corridor proposal -> approval queue -> simulated signals; SUMO + TraCI environment setup | One flood scenario yields linked findings and pending approval actions; green corridor triggers | Scripted scenario |
-| **8-11** | **RL training & dashboard polish:**<br>• A: Platform stress testing, Resilience4j circuit breakers, end-to-end audit verification<br>• B: Knowledge base manager in dashboard, agent evaluation benchmark (20 seed Qs)<br>• C: Dashboard complaints board (Kanban, assignment, SLA countdown)<br>• D: DQN signal policy training vs fixed-time baseline, dashboard traffic chart & video playback | DQN vs fixed-time wait reported honestly on dashboard; full admin operations working | Recorded SUMO run |
-| **12** | **Integration pass:** Swap fallbacks for live implementations where tests pass; polish labels (`SIMULATED`, `PREDICTED`, `STALE`), loading, empty, and error states | Demo path runs twice end-to-end without hiccups | Flaky parts stay on fallback |
-| **13** | **Feature freeze:** Bug fixes only; record backup demo video; seed final demo data; build APK / dev build | Backup video exists; app installs cleanly | Video demo backup |
-| **14** | **Rehearsal & presentation:** Rehearse 5-minute script 3 times; polish slide deck; Q&A prep | Smooth 5-minute demo delivery | Slide deck |
+## 7. 1-Hour Hosting Blueprint (`docker-compose.yml`)
 
-## 12. Demo script (5 minutes)
+### Unified Multi-Container Topology
 
-1. Phone: ask the agent in Hindi by voice "what is happening near Clock Tower today?" Get events and a cited answer.
-2. Ask something outside the knowledge base. The agent abstains and offers a complaint.
-3. File a geo-tagged complaint with photo. Show the tracking ID, the dashboard board, and the escalation ladder fast-forwarding.
-4. Admin injects heavy rain. Underpass flood incident appears; agents post linked findings; citizens get a warning.
-5. Ambulance route: a congestion spike causes no reroute; a verified blockage reroutes with a logged reason.
-6. Green corridor proposal lands in the approval queue. Admin approves; phone shows "clear the lane".
-7. Traffic panel: YOLO density on sample video and SUMO DQN vs baseline (labelled simulated).
+```mermaid
+flowchart TD
+    PublicInternet["🌐 Public Internet / Port 80 & 443"] --> ReverseProxy["Reverse Proxy (Caddy / Nginx)"]
+    
+    ReverseProxy -->|/api/agent/*<br/>/api/voice/*<br/>/api/tts/*| AgentService["agent_service:8000<br/>(FastAPI / Uvicorn)"]
+    ReverseProxy -->|/api/auth/*<br/>/api/geo/*<br/>/api/avatars/*<br/>/api/complaints/*| CoreService["core:8080<br/>(Spring Boot 3.3)"]
+    ReverseProxy -->|/api/complaint-flow/*<br/>/api/feed/*| ComplaintService["complaint_module:8001<br/>(FastAPI / Uvicorn)"]
+    ReverseProxy -->|/api/emergency/*<br/>/api/routing/*| EmergencyService["emergency_routing:8002<br/>(FastAPI / Uvicorn)"]
+    ReverseProxy -->|/* (Static)| WebApp["Web Portal / UI Dashboard"]
+    
+    CoreService --> PostgresDB[("postgres-postgis:5432<br/>PostgreSQL 16 + PostGIS")]
+    AgentService --> PostgresDB
+```
 
-## 13. Acceptance tests
+### Complete `docker-compose.yml` Configuration
 
-- `DEMO_MODE=1` runs the full script with the network off.
-- Agent answers cite a source or abstain. Automated check on 20 seed questions, including 5 outside the knowledge base.
-- Hindi and English voice round trip works, or the cached fallback triggers cleanly.
-- A complaint escalates through every level with audit entries.
-- Route does not switch on a transient spike; does switch on a verified blockage; each change is logged.
-- High-impact actions stay pending until approved; approve and reject are both audit-logged.
-- Mobile and dashboard show the same incident within 2 seconds of injection.
-- Every simulated or predicted value is visibly labelled.
-- Spring tests (Testcontainers) cover escalation, coordinator correlation and approval rules.
+```yaml
+version: "3.8"
 
-## 14. Risks and pre-decided responses
+services:
+  postgres-postgis:
+    build: ./db
+    image: citysense-db:latest
+    container_name: citysense-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-citysense}
+      POSTGRES_USER: ${POSTGRES_USER:-citysense}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-citysense}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - citysense-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
 
-| Risk | Response |
-|---|---|
-| Two-service boundary slows early days | Contracts first; stubs for every internal call on day 1; Spring spine gate on day 4 |
-| Sarvam or LLM quota / latency fails live | Resilience4j circuit breaker plus cached answers; show text mode |
-| SUMO / DQN does not converge by day 11 | Report baseline vs best checkpoint honestly; replay recording |
-| Agent-generated code diverges across verticals | Contracts-first, daily 15-minute sync, one integration branch |
-| YOLO accuracy on mixed Indian traffic | Present as proof of concept on sample video; no city-grade accuracy claim |
-| STOMP on React Native needs polyfills | Fall back to plain WebSocket or SSE for the mobile client |
-| Mobile build problems on demo day | Expo Go as backup, screen recording as final backup |
-| Scope creep | After day 12, nothing new merges |
+  core:
+    build: ./core
+    container_name: citysense-core
+    depends_on:
+      postgres-postgis:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-postgis:5432/${POSTGRES_DB:-citysense}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-citysense}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-citysense}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-please-32-bytes-min!!}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-internal-key}
+      DEMO_MODE: ${DEMO_MODE:-1}
+      SEED_AVATARS: "true"
+      SEED_USERS: "true"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
 
-## 15. Out of scope and honesty
+  agent-service:
+    build:
+      context: ./agent_service
+      dockerfile: Dockerfile
+    container_name: citysense-agent
+    depends_on:
+      - postgres-postgis
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-citysense}:${POSTGRES_PASSWORD:-citysense}@postgres-postgis:5432/${POSTGRES_DB:-citysense}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-please-32-bytes-min!!}
+      SARVAM_API_KEY: ${SARVAM_API_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      DEMO_MODE: "0"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
 
-No claims of live access to city cameras, signals, hospitals, dispatch or citizen identity. CM-portal escalation, signal control and dispatch are simulated. Real deployment needs authorised integrations and legal, privacy and safety review.
+  complaint-module:
+    build:
+      context: ./complaint_module
+      dockerfile: Dockerfile
+    container_name: citysense-complaints
+    environment:
+      PORT: 8001
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
 
-## 16. Day-1 checklist
+  emergency-routing:
+    build:
+      context: ./emergency_routing
+      dockerfile: Dockerfile
+    container_name: citysense-emergency
+    environment:
+      PORT: 8002
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
 
-- [ ] 1. Create the repo layout, `docker-compose.yml` and `.env.example` (DB, SARVAM_KEY, LLM_KEY, DEMO_MODE, ESCALATION_TICK_SECONDS, AI_SERVICE_URL). *(AI Service container & .env.example complete in `Avatarzip`)*
-- [ ] 2. Spring Boot skeleton (Maven, Java 21) with Flyway baseline from section 7, springdoc, JWT stub, STOMP `/ws`.
-- [ ] 3. Write the public and internal OpenAPI specs from section 9; generate TypeScript types for mobile and dashboard and the Java client for ai-service.
-- [ ] 4. Seed data: Dehradun junctions, hospitals, 10 events, 10 knowledge docs, 3 complaints. *(Agent configs & knowledge seed pipeline implemented in `Avatarzip/scripts/seed.py`)*
-- [x] 5. FastAPI skeleton with `/health` and stub endpoints returning cached JSON. *(Fully implemented in `Avatarzip` with full RAG, providers, and orchestrator)*
-- [ ] 6. Expo and Vite apps render the map and show injected events live over STOMP.
+  reverse-proxy:
+    image: caddy:2-alpine
+    container_name: citysense-proxy
+    depends_on:
+      - core
+      - agent-service
+      - complaint-module
+      - emergency-routing
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./govt_portal:/var/www/html:ro
+    restart: unless-stopped
+
+volumes:
+  citysense-pgdata:
+```
+
+### Production `Caddyfile` Routing Table
+
+```caddyfile
+:80 {
+    encode gzip zstd
+
+    # Agent Service (Voice STT/TTS & Planner)
+    handle /api/agent/* {
+        reverse_proxy agent-service:8000
+    }
+    handle /api/voice/* {
+        reverse_proxy agent-service:8000
+    }
+    handle /api/tts/* {
+        reverse_proxy agent-service:8000
+    }
+
+    # Emergency Routing & Vision Triage
+    handle /api/emergency/* {
+        reverse_proxy emergency-routing:8002
+    }
+
+    # Complaint Escalation Module
+    handle /api/complaint-flow/* {
+        reverse_proxy complaint-module:8001
+    }
+
+    # Spring Boot Core (Auth, Geo, Avatars, Complaints)
+    handle /api/* {
+        reverse_proxy core:8080
+    }
+    handle /avatars/* {
+        reverse_proxy core:8080
+    }
+
+    # Citizen Web Portal & Static Assets
+    handle {
+        root * /var/www/html
+        file_server
+        try_files {path} /index.html
+    }
+}
+```
+
+---
+
+## 8. Step-by-Step Execution Sequence for Claude
+
+When executing this plan:
+
+1. **Step 1: Expand Tool Registry (`agent_service/src/agent/tools.py`)**:
+   - Add the Pydantic schemas and execution handlers for all missing tools: `dispatch_emergency_team`, `escalate_complaint_sla`, `verify_citizen_location`, `fetch_weather_inundation`, `get_air_quality_index`, `get_ward_councillor_info`, `override_traffic_signal`, `get_nearest_hospital`.
+   - Update `TOOL_MODELS` and `tool_schemas()`.
+
+2. **Step 2: Implement Dynamic Planner in Main Voice Agent (`agent_service/src/agent/orchestrator.py`)**:
+   - Build `VoiceAgentPlanner` class.
+   - Decompose incoming voice transcription into actionable plan steps.
+   - Strictly route domain tasks to `CivicComplaintSpecialist`, `EmergencySpecialist`, `CityPulseSpecialist`, or `KnowledgeSpecialist`.
+   - Enforce the **Non-Duplication Invariant**: Main agent only calls cross-cutting tools directly; all domain tools are invoked inside their respective subagents.
+
+3. **Step 3: Update Sub-Agents to Execute New Domain Tools**:
+   - `complaint_agent.py`: Execute `escalate_complaint_sla`, `verify_photo_evidence`, `reassign_worker`.
+   - `emergency_agent.py`: Execute `dispatch_emergency_team`, `get_emergency_corridor`, `override_traffic_signal`.
+   - `city_pulse_agent.py`: Execute `fetch_weather_inundation`, `get_air_quality_index`, `get_active_alerts`.
+
+4. **Step 4: Update Mobile Client with Mic & Speaker Controls (`mobile/src/app/avatar/[id].tsx`)**:
+   - Add microphone recording state & trigger (`recordVoice()`).
+   - Add speaker mute toggle button (`🔊 / 🔇`) in the chat header.
+   - Add audio playback handler that calls `/api/agent/tts` and streams through device audio if unmuted.
+   - Display implementation plan steps dynamically in the chat bubble.
+
+5. **Step 5: Bridge Spring Boot `AgentResponder.java`**:
+   - Configure HTTP client in `core` to forward free-text avatar chats directly to `agent_service:8000/api/agent/chat`.
+
+6. **Step 6: Dockerize & Launch**:
+   - Create Dockerfiles for `agent_service`, `complaint_module`, and `emergency_routing`.
+   - Write `Caddyfile` and update `docker-compose.yml`.
+   - Run verification suite: STT voice upload -> Planner decomposition -> Subagent execution -> TTS speech generation -> HTTP 200 checks.

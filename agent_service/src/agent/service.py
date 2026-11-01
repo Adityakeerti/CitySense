@@ -75,6 +75,24 @@ def evidence_for(hits: list[RetrievalHit], threshold: float, city: str | None):
     )
 
 
+def _as_sources(items: list) -> list[Source]:
+    """Normalise specialist sources (dicts / Source / RetrievalHit) into response Sources."""
+    out: list = []
+    for item in items or []:
+        if isinstance(item, (Source, RetrievalHit)):
+            out.append(item)
+        elif isinstance(item, dict):
+            out.append(Source(
+                docId=str(item.get("docId") or item.get("doc_id") or "DOC"),
+                title=item.get("title", "Official Record"),
+                url=item.get("url"),
+                excerpt=(item.get("excerpt") or "")[:500],
+                fetchedAt=item.get("fetchedAt") or utcnow(),
+                stale=bool(item.get("stale", False)),
+            ))
+    return out
+
+
 async def chat(session: AsyncSession, principal: Principal, request: ChatRequest) -> AgentResponse:
     started = time.monotonic()
     try:
@@ -103,14 +121,20 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
             {"key": str(request.sessionId)},
         )
-        chat_session = await session.scalar(
-            select(ChatSession).where(
-                ChatSession.session_id == request.sessionId,
-                ChatSession.user_id == principal.user_id,
-            )
-        )
-        if not chat_session:
+        chat_session = await session.get(ChatSession, request.sessionId)
+        if chat_session and chat_session.user_id != principal.user_id:
             raise HTTPException(404, "Session not found")
+        if not chat_session:
+            # Gateways (core) may mint the session id before the agent has seen it: adopt it.
+            await get_agent(session, agent_id)
+            chat_session = ChatSession(
+                session_id=request.sessionId,
+                user_id=principal.user_id,
+                agent_id=agent_id,
+                language=request.language,
+            )
+            session.add(chat_session)
+            await session.flush()
         if request.agentId and request.agentId != chat_session.agent_id:
             raise HTTPException(409, "Session persona cannot be changed by the request")
         agent_id = chat_session.agent_id
@@ -132,14 +156,18 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
 
     from src.agent.orchestrator import supervisor
 
-    (
-        handled,
-        sub_status,
-        sub_answer,
-        sub_sources,
-        sub_cta,
-        sub_pending,
-    ) = await supervisor.evaluate_turn(
+    try:  # history only sharpens follow-up routing; never fail a turn over it
+        recent = (
+            await session.scalars(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == chat_session.session_id)
+                .order_by(ChatMessage.created_at.desc())
+                .limit(6)
+            )
+        ).all()
+    except Exception:
+        recent = []
+    outcome = await supervisor.evaluate_turn(
         session=session,
         principal=principal,
         request=request,
@@ -148,19 +176,28 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
         language=language,
         city=city,
         started=started,
+        history=[{"role": m.role, "content": m.content[:1000]} for m in reversed(recent)],
     )
-    if handled:
-        return await persist_turn(
+    # Every response from here on carries the main agent's plan and tool trace.
+    from src.agent.orchestrator import finalize_plan
+
+    async def persist(*args, **kwargs):
+        # args[4] is the final status of the turn
+        return await persist_turn(*args, **kwargs, plan=finalize_plan(outcome.plan, args[4]),
+                                  tool_calls=outcome.tool_calls, action_data=outcome.action_data)
+    if outcome.handled:
+        served = "fallback" if outcome.tool_calls and all(c.served == "fallback" for c in outcome.tool_calls) else "live"
+        return await persist(
             session,
             chat_session,
             request,
             agent,
-            sub_status,
-            sub_answer,
-            sub_sources,
-            "live",
-            cta=sub_cta,
-            pending_action=sub_pending,
+            outcome.status,
+            outcome.answer,
+            _as_sources(outcome.sources),
+            served,
+            cta=outcome.cta,
+            pending_action=outcome.pending_action,
             started=started,
         )
 
@@ -172,7 +209,7 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
             if language == "hi"
             else "I do not have verified information for that question."
         )
-        return await persist_turn(
+        return await persist(
             session,
             chat_session,
             request,
@@ -206,7 +243,7 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
             session, request.message, agent, hits, language, city, principal.user_id
         )
         if cached:
-            return await persist_turn(
+            return await persist(
                 session,
                 chat_session,
                 request,
@@ -236,7 +273,7 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
                 history=history,
             )
         except RuntimeError:
-            return await persist_turn(
+            return await persist(
                 session,
                 chat_session,
                 request,
@@ -259,7 +296,7 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
                     city,
                     principal.user_id,
                 )
-            return await persist_turn(
+            return await persist(
                 session,
                 chat_session,
                 request,
@@ -273,7 +310,7 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
                 started=started,
             )
         if generated.provider == "local" and not settings.local_tools_enabled:
-            return await persist_turn(
+            return await persist(
                 session,
                 chat_session,
                 request,
@@ -311,7 +348,7 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
                     )
                 )
                 if name == "ask_clarification":
-                    return await persist_turn(
+                    return await persist(
                         session,
                         chat_session,
                         request,
@@ -341,7 +378,7 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
                         )
                     )
                     pending = PendingActionView(token=token, summary=summary, expiresAt=expires)
-                    return await persist_turn(
+                    return await persist(
                         session,
                         chat_session,
                         request,
@@ -361,7 +398,7 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
                     fresh = await retrieve(session, request.message, target.tenants)
                     verdict = evidence_for(fresh, target.min_similarity, city)
                     if verdict.abstain:
-                        return await persist_turn(
+                        return await persist(
                             session,
                             chat_session,
                             request,
@@ -390,7 +427,11 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
                         hits = [h for h in found if str(h.chunk_id) in ids]
                         result = {"passages": [h.text for h in hits]}
                 else:
-                    result = await read_tool(name, args, principal.user_id)
+                    # Invariant 2: the LLM may *select* a domain tool, but it executes under the
+                    # identity of its owning specialist, never as the main agent.
+                    from src.agent.tool_registry import TOOL_OWNERS, call_tool
+
+                    result = await call_tool(TOOL_OWNERS[name], name, args, principal.user_id)
                     used_tool_fallback = used_tool_fallback or result.get("served") == "fallback"
             except (ValueError, KeyError, TypeError, HTTPException) as exc:
                 result = {"error": str(exc)}
@@ -404,7 +445,7 @@ async def chat(session: AsyncSession, principal: Principal, request: ChatRequest
                     "content": json.dumps(result, ensure_ascii=False)[:10000],
                 }
             )
-    return await persist_turn(
+    return await persist(
         session,
         chat_session,
         request,
@@ -432,9 +473,12 @@ async def persist_turn(
     pending_action: PendingActionView | None = None,
     handoff: dict | None = None,
     started: float | None = None,
+    plan: list | None = None,
+    tool_calls: list | None = None,
+    action_data: dict | None = None,
 ) -> AgentResponse:
     sources = [
-        Source(
+        h if isinstance(h, Source) else Source(
             docId=str(h.doc_id),
             title=h.title,
             url=h.source_url,
@@ -444,6 +488,7 @@ async def persist_turn(
         )
         for h in hits
     ]
+    hits = [h for h in hits if not isinstance(h, Source)]
     message_id = uuid4()
     response = AgentResponse(
         sessionId=chat_session.session_id,
@@ -456,6 +501,9 @@ async def persist_turn(
         pendingAction=pending_action,
         handoff=handoff,
         served=served,
+        plan=plan,
+        toolCalls=tool_calls,
+        actionData=action_data,
     )
     session.add(
         ChatMessage(
@@ -553,7 +601,7 @@ async def confirm_action(
         return result
     except Exception:
         from src.agent.offline import offline_confirm_action
-        return offline_confirm_action(principal, token)
+        return await offline_confirm_action(principal, token)
 
 
 async def cancel_action(session: AsyncSession, principal: Principal, token: str) -> ConfirmResponse:

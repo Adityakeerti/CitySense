@@ -176,8 +176,8 @@ COMPLAINT_EN = re.compile(
     r"blocked\s+drain|clogged\s+sewer|overflowing\s+gutter|open\s+manhole|manhole\s+cover\s+missing|waterlogging|"
     r"encroachments?|hawkers?\b|footpath\s+blocked|blocking\s+(?:pedestrian|sidewalk|footpath|road)|unauthorized\s+construction|"
     r"stray\s+dogs?\s+(?:pack|menace|biting)|stray\s+cattle|cows?\s+blocking\s+road|"
-    r"file\s+(?:a\s+)?complaint|lodge\s+(?:a\s+)?complaint|register\s+complaint|report\s+(?:this\s+)?(?:issue|problem)|"
-    r"shikayat|\bgrievances?\b(?!\s*department)"
+    r"\b(?:i\s+want\s+to\s+)?(?:file|lodge|register|submit|make|raise)\s+(?:a\s+)?(?:complaint|grievance|issue|report)\b|"
+    r"\bcomplaints?\b|\bcomplain\b|\bgrievances?\b(?!\s*department)|shikayat"
     r")\b",
     re.IGNORECASE,
 )
@@ -189,7 +189,7 @@ COMPLAINT_HI = re.compile(
     r"स्ट्रीट\s+लाइट|बत्ती\s+बंद|अंधेरा\s+है|खंभा\s+टूट|लाइट\s+खराब|बिजली\s+का\s+तार\s+झूल|"
     r"पानी\s+का\s+रिसाव|पाइप\s+(?:फटा|टूटा)|गंदा\s+पानी|पानी\s+नहीं\s+आ\s+रहा|नाली\s+(?:जाम|चोक)|सीवर\s+ओवरफ्लो|खुला\s+मैनहोल|गटर|जलभराव|"
     r"अतिक्रमण|अवैध\s+कब्जा|फुटपाथ\s+बंद|आवारा\s+कुत्ते|लावारिस\s+पशु|गाय\s+सड़क\s+पर|"
-    r"शिकायत\s+दर्ज|शिकायत\s+करनी\s+है|समस्या\s+की\s+रिपोर्ट|कार्रवाई\s+करें"
+    r"शिकायत\s+(?:दर्ज|करनी\s+है|करना\s+चाहता|करनी\s+चाहती)|\bशिकायत\b|\bसमस्या\b|समस्या\s+की\s+रिपोर्ट|कार्रवाई\s+करें"
     r")",
     re.IGNORECASE,
 )
@@ -363,7 +363,17 @@ class ScopeClassifier:
                 is_civic=True,
             )
 
-        # 5. Civic Live Data Check
+        # 5. Civic Complaint Check (Check complaints before general knowledge)
+        if has_complaint:
+            return ScopeClassificationResult(
+                scope=QueryScope.CIVIC_COMPLAINT,
+                confidence=0.95,
+                detected_topic="civic_complaint",
+                language=lang,
+                is_civic=True,
+            )
+
+        # 6. Civic Live Data Check
         if has_live_data:
             return ScopeClassificationResult(
                 scope=QueryScope.CIVIC_LIVE_DATA,
@@ -373,22 +383,12 @@ class ScopeClassifier:
                 is_civic=True,
             )
 
-        # 6. Civic Knowledge Check
+        # 7. Civic Knowledge Check
         if has_knowledge:
             return ScopeClassificationResult(
                 scope=QueryScope.CIVIC_KNOWLEDGE,
                 confidence=0.92,
                 detected_topic="civic_knowledge",
-                language=lang,
-                is_civic=True,
-            )
-
-        # 7. Civic Complaint Check
-        if has_complaint:
-            return ScopeClassificationResult(
-                scope=QueryScope.CIVIC_COMPLAINT,
-                confidence=0.95,
-                detected_topic="civic_complaint",
                 language=lang,
                 is_civic=True,
             )

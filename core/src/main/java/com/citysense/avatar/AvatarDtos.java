@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public final class AvatarDtos {
@@ -26,10 +27,15 @@ public final class AvatarDtos {
             @Size(max = 2000) String message,
             ChatIntent intent,
             @Pattern(regexp = "^[a-z]{2}$") String language,
-            @Size(max = 64) String sessionId) {}
+            @Size(max = 64) String sessionId,
+            Double latitude,
+            Double longitude) {}
 
+    /** Agent-backed replies also carry the execution plan, a confirmable action and structured cards. */
     public record AvatarChatResponse(String sessionId, String reply, ChatIntent intent, String link,
-                                     List<String> sources, Instant timestamp) {}
+                                     List<String> sources, Instant timestamp, String status,
+                                     List<Map<String, Object>> plan, Map<String, Object> pendingAction,
+                                     Map<String, Object> actionData) {}
 
     public record ToggleResponse(UUID avatarId, boolean active, long count) {}
 

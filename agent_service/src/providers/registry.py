@@ -24,8 +24,6 @@ async def generate_with_failover(
     tools: list[dict] | None = None,
     history: list[dict] | None = None,
 ) -> GeneratedText:
-    if settings.demo_mode:
-        return GeneratedText(_extractive_answer(context, language), "offline-extractive", True)
     providers = configured_providers()
     async with _semaphore:
         for name in settings.providers:
@@ -68,4 +66,7 @@ async def generate_with_failover(
                         break
                     if attempt == 0:
                         await asyncio.sleep(0.1)
+
+    if settings.demo_mode:
+        return GeneratedText(_extractive_answer(context, language), "offline-extractive", True)
     raise RuntimeError("No text provider is available")

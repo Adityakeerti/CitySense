@@ -16,6 +16,8 @@ class ComplaintArgs(ToolArgs):
     category: str = Field(min_length=2, max_length=100)
     location: str = Field(min_length=3, max_length=500)
     description: str = Field(min_length=10, max_length=4000)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
 class StatusArgs(ToolArgs):
@@ -46,7 +48,71 @@ class CorridorArgs(ToolArgs):
 
 
 class UserArgs(ToolArgs):
-    user_id: str = Field(min_length=1, max_length=100)
+    user_id: str | None = Field(default=None, max_length=100)
+
+
+# ── Arguments for the extended tool catalog (see tool_registry.py for owners) ──
+
+class LocationQueryArgs(ToolArgs):
+    query: str = Field(min_length=2, max_length=300)
+
+
+class CoordinatesArgs(ToolArgs):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
+class OfficerHandoffArgs(ToolArgs):
+    reason: str = Field(min_length=3, max_length=500)
+    urgency: str = Field(default="normal", pattern=r"^(normal|high|critical)$")
+
+
+class AudioPreferenceArgs(ToolArgs):
+    auto_play: bool
+    preferred_speaker: str = Field(default="aditya", max_length=30)
+
+
+class TrackingArgs(ToolArgs):
+    tracking_id: str = Field(min_length=3, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+class ReassignArgs(TrackingArgs):
+    reason: str = Field(default="SLA stalled; reassigned to rapid action squad.", max_length=500)
+
+
+class DispatchArgs(ToolArgs):
+    incident_type: str = Field(default="accident", pattern=r"^(medical|accident|fire|police|feud|other)$")
+    severity: str = Field(default="P0", pattern=r"^P[012]$")
+    location: str = Field(default="", max_length=300)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    description: str = Field(default="", max_length=2000)
+
+
+class SignalOverrideArgs(ToolArgs):
+    corridor_id: str | None = Field(default=None, max_length=100)
+    signals: list[str] = Field(default_factory=list, max_length=50)
+
+
+class NearestHospitalArgs(ToolArgs):
+    location: str = Field(default="", max_length=300)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
+
+
+class FeedArgs(ToolArgs):
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class BroadcastArgs(ToolArgs):
+    title: str = Field(min_length=3, max_length=200)
+    message: str = Field(min_length=3, max_length=1000)
+    area: str = Field(default="Dehradun", max_length=200)
+    severity: str = Field(default="WARNING", pattern=r"^(INFO|WARNING|CRITICAL)$")
+
+
+class AreaArgs(ToolArgs):
+    area: str = Field(default="", max_length=200)
 
 
 TOOL_MODELS = {
@@ -60,6 +126,29 @@ TOOL_MODELS = {
     "get_traffic_density": DensityArgs,
     "get_emergency_corridor": CorridorArgs,
     "list_user_complaints": UserArgs,
+    # Main voice agent (cross-cutting)
+    "verify_citizen_location": LocationQueryArgs,
+    "reverse_geocode_coordinates": CoordinatesArgs,
+    "handoff_to_officer": OfficerHandoffArgs,
+    "toggle_audio_preference": AudioPreferenceArgs,
+    # Civic complaint specialist
+    "escalate_complaint_sla": TrackingArgs,
+    "reassign_worker": ReassignArgs,
+    "verify_photo_evidence": TrackingArgs,
+    # Emergency specialist
+    "dispatch_emergency_team": DispatchArgs,
+    "override_traffic_signal": SignalOverrideArgs,
+    "get_nearest_hospital": NearestHospitalArgs,
+    "get_cctv_incident_feed": FeedArgs,
+    "broadcast_safety_alert": BroadcastArgs,
+    # City pulse specialist
+    "fetch_weather_inundation": AreaArgs,
+    "get_air_quality_index": AreaArgs,
+    "check_water_supply_schedule": AreaArgs,
+    # Knowledge specialist
+    "get_ward_councillor_info": AreaArgs,
+    "query_municipal_by_laws": QueryArgs,
+    "get_waste_collection_route": AreaArgs,
 }
 
 READ_TOOL_NAMES = {
@@ -84,6 +173,24 @@ def tool_schemas(allowed: list[str]) -> list[dict]:
         "get_traffic_density": "Get real-time traffic density, congestion index, and wait times for a junction or corridor.",
         "get_emergency_corridor": "Activate or query an emergency green wave corridor between origin and destination.",
         "list_user_complaints": "List active and historical municipal complaints filed by a citizen.",
+        "verify_citizen_location": "Geocode an informal Dehradun landmark or street to latitude/longitude and zone.",
+        "reverse_geocode_coordinates": "Resolve GPS coordinates to the nearest known locality, address and municipal zone.",
+        "handoff_to_officer": "Escalate the conversation to a human municipal officer.",
+        "toggle_audio_preference": "Save the citizen's voice playback preference (auto-play on/off, speaker).",
+        "escalate_complaint_sla": "Escalate an overdue complaint one step up the SLA authority ladder.",
+        "reassign_worker": "Reassign a stalled complaint to the department's rapid action squad.",
+        "verify_photo_evidence": "Check that a resolved complaint has on-site proof evidence recorded.",
+        "dispatch_emergency_team": "Dispatch the nearest ambulance / police / fire unit with a green-wave route.",
+        "override_traffic_signal": "Pre-empt traffic signals to green along an emergency corridor.",
+        "get_nearest_hospital": "Find the nearest hospital with free emergency capacity.",
+        "get_cctv_incident_feed": "List recent CCTV / vision-detected accidents and altercations.",
+        "broadcast_safety_alert": "Queue a geo-fenced safety alert for officer verification and broadcast.",
+        "fetch_weather_inundation": "Current rainfall and estimated underpass water depth with diversion advice.",
+        "get_air_quality_index": "Current AQI, PM2.5 and PM10 for a locality.",
+        "check_water_supply_schedule": "Water supply guidance and helplines for an area.",
+        "get_ward_councillor_info": "Ward/zone details and municipal helplines for an area.",
+        "query_municipal_by_laws": "Answer questions on property tax, trade licences and municipal rules from the verified corpus.",
+        "get_waste_collection_route": "Door-to-door waste collection rules and contacts for an area.",
     }
     return [
         {
@@ -294,7 +401,7 @@ def _get_mock_data(name: str, args: dict, user_id: str = "") -> dict:
         }
 
     if name == "list_user_complaints":
-        uid = args.get("user_id") or user_id or "anonymous"
+        uid = args.get("user_id") or user_id or "citizen_demo"
         return {
             "served": "fallback",
             "simulated": True,
@@ -306,15 +413,29 @@ def _get_mock_data(name: str, args: dict, user_id: str = "") -> dict:
                     "location": "Subhash Road near Clock Tower, Dehradun",
                     "description": "Deep asphalt crater causing traffic bottleneck and accident risk near Central Bank.",
                     "status": "IN_PROGRESS",
+                    "priority": "HIGH",
+                    "assigned_worker": "Ramesh Negi (Rapid Road Unit 2)",
                     "created_at": "2026-10-31T08:30:00Z",
                 },
                 {
-                    "tracking_id": "NND-2026-0792",
+                    "tracking_id": "NND-2026-0842",
                     "category": "Defective Streetlights",
-                    "location": "Sahastradhara Road, Lane 4",
-                    "description": "Streetlight pole flickering continuously for past 3 nights.",
-                    "status": "RESOLVED",
-                    "created_at": "2026-10-24T14:15:00Z",
+                    "location": "Rajpur Road near Jakhan, Dehradun",
+                    "description": "5 consecutive streetlight poles are completely dark between Jakhan and IT Park turn.",
+                    "status": "WARNING_1",
+                    "priority": "MEDIUM",
+                    "assigned_worker": "Sunil Rawat (Electrical Maintenance)",
+                    "created_at": "2026-10-31T09:15:00Z",
+                },
+                {
+                    "tracking_id": "NND-2026-0843",
+                    "category": "Garbage and Sanitation Dumps",
+                    "location": "Paltan Bazaar North Gate, Dehradun",
+                    "description": "Commercial waste accumulating on pedestrian sidewalk, emitting foul odor.",
+                    "status": "ASSIGNED",
+                    "priority": "HIGH",
+                    "assigned_worker": "Vikram Chauhan (Sanitary Inspection Squad 4)",
+                    "created_at": "2026-10-31T10:00:00Z",
                 },
             ],
         }
@@ -367,6 +488,18 @@ async def read_tool(name: str, args: dict, user_id: str = "") -> dict:
 
 async def execute_complaint(args: dict, token: str, user_id: str = "") -> dict:
     ComplaintArgs.model_validate(args)
+    if settings.complaint_service_url:
+        # File into the complaint module (8001): worker assignment + SLA escalation ladder.
+        from src.agent.integrations import complaint_create
+
+        item = await complaint_create(args, args.get("latitude"), args.get("longitude"))
+        return {
+            "trackingId": item["tracking_id"],
+            "status": item.get("status"),
+            "category": item.get("category"),
+            "assignedWorker": (item.get("assigned_worker") or {}).get("name"),
+            "slaSeconds": item.get("sla_seconds"),
+        }
     if settings.demo_mode or not settings.complaint_adapter_url:
         return {
             "trackingId": f"MOCK-{hashlib.sha256(token.encode()).hexdigest()[:12].upper()}",

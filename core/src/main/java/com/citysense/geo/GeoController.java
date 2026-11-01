@@ -26,7 +26,10 @@ public class GeoController {
     private final GeoService geo;
     private final GeoProperties props;
 
-    public GeoController(GeoService geo, GeoProperties props) {
+    private final VectorStyleProvider vectorStyle;
+
+    public GeoController(GeoService geo, GeoProperties props, VectorStyleProvider vectorStyle) {
+        this.vectorStyle = vectorStyle;
         this.geo = geo;
         this.props = props;
     }
@@ -40,9 +43,10 @@ public class GeoController {
     }
 
     @GetMapping(value = "/style.json", produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "MapLibre style whose raster tiles point at this proxy")
+    @Operation(summary = "MapLibre style: detailed vector streets + 3D buildings, or proxied raster OSM as fallback")
     public Map<String, Object> style() {
-        return geo.style(ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString());
+        return vectorStyle.style().orElseGet(
+                () -> geo.style(ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString()));
     }
 
     @GetMapping("/tiles/{z}/{x}/{y}.png")

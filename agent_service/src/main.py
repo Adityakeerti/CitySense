@@ -51,8 +51,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+    allow_methods=["GET", "POST", "PUT"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-CitySense-Source"],
 )
 
 
@@ -110,8 +110,7 @@ async def generic_error_handler(request: Request, exc: Exception):
     )
 
 
-from pathlib import Path
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse  # noqa: E402
 
 from src.admin import router as admin_router  # noqa: E402
 from src.agent.offline import get_all_complaints, resolve_complaint_by_id  # noqa: E402
@@ -147,8 +146,11 @@ async def resolve_complaint(tracking_id: str, request: Request):
 @app.get("/ui", include_in_schema=False)
 @app.get("/", include_in_schema=False)
 async def serve_ui():
-    ui_path = Path(__file__).resolve().parent.parent / "UI.html"
-    if ui_path.exists():
-        return FileResponse(ui_path)
-    return HTMLResponse("<h3>UI.html not found</h3>")
+    # The single-file UI.html dashboards were retired (kept in Project/residuals/); the operator
+    # dashboard is the React app in Project/dashboard/.
+    return HTMLResponse(
+        "<h2>CitySense Agent Service</h2><p>Service is running. API docs: <a href='docs'>/docs</a> · "
+        "health: <a href='health'>/health</a>. The operator dashboard is the React app in "
+        "<code>dashboard/</code> (dev: <a href='http://localhost:5173'>http://localhost:5173</a>).</p>"
+    )
 

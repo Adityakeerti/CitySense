@@ -279,9 +279,10 @@ class MeshHTTPHandler(BaseHTTPRequestHandler):
         print(f"[*] Broadcasted [{mtype.upper()}] frame: ID={mid} From={sender_id}")
 
     def serve_ui(self):
-        ui_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui.html")
-        if not os.path.exists(ui_path):
-            ui_path = "ui.html"
+        # The mesh messenger page was moved with the other single-file UIs to residuals/.
+        ui_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "residuals", "mesh_messenger.ui.html"
+        )
 
         try:
             with open(ui_path, "rb") as f:

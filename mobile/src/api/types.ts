@@ -67,6 +67,24 @@ export interface Avatar {
 
 export type ChatIntent = "INTRO" | "PRICING" | "WEBSITE";
 
+/** One step of the main voice agent's execution plan (who ran what). */
+export interface PlanStep {
+  id: number;
+  executor: string;
+  action: string;
+  tools: string[];
+  status: "planned" | "running" | "completed" | "failed" | "skipped";
+  detail?: string | null;
+}
+
+/** An action the agent proposed that the citizen must confirm (e.g. a drafted complaint). */
+export interface PendingAgentAction {
+  token: string;
+  summary: string;
+  expiresAt: string;
+  action_type?: string;
+}
+
 export interface AvatarChatResponse {
   sessionId: string;
   reply: string;
@@ -74,6 +92,32 @@ export interface AvatarChatResponse {
   link?: string;
   sources?: string[];
   timestamp: string;
+  status?: string;
+  plan?: PlanStep[] | null;
+  pendingAction?: PendingAgentAction | null;
+  actionData?: Record<string, any> | null;
+}
+
+/** A main-agent reply (map-tap briefing or follow-up), straight from agent_service. */
+export interface AgentReply {
+  sessionId: string;
+  status: string;
+  answer: string;
+  plan?: PlanStep[] | null;
+  sources?: { title: string; url?: string | null }[];
+  actionData?: Record<string, any> | null;
+  pendingAction?: PendingAgentAction | null;
+}
+
+export interface ConfirmResult {
+  status: "executed" | "failed" | "rejected" | "cancelled";
+  result?: { trackingId?: string; assignedWorker?: string; [k: string]: unknown } | null;
+  detail?: string | null;
+}
+
+export interface AudioPreference {
+  auto_play: boolean;
+  preferred_speaker: string;
 }
 
 export interface ToggleResponse {
@@ -135,4 +179,28 @@ export interface LiveMessage {
   entityId: string;
   data: unknown;
   timestamp: string;
+}
+
+/** A notice published from the state govt portal (served by the complaint module). */
+export interface Notice {
+  id: string;
+  referenceNumber: string;
+  title: string;
+  hindiTitle?: string;
+  department: string;
+  category: string;
+  priority: string;
+  signatory: string;
+  summary: string;
+  body: string;
+  publishDate: string;
+  expiryDate?: string | null;
+  isPinned: boolean;
+  tags: string[];
+}
+
+/** Escalation ladder from the complaint module: statuses[i] is escalation level i. */
+export interface ComplaintMeta {
+  statuses: string[];
+  escalationLadder: string[];
 }

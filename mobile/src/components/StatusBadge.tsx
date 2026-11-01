@@ -15,8 +15,17 @@ const tone: Record<string, string> = {
   INFO: colors.accentBlue,
 };
 
+/** Complaint-module ladder statuses: WORKER_ASSIGNED, WARNING_1..5, ESCALATED_<authority>. */
+function ladderTone(v: string): string | undefined {
+  if (v === "WORKER_ASSIGNED") return colors.warning;
+  if (v.startsWith("WARNING_")) return colors.warning;
+  if (v.startsWith("ESCALATED_")) return colors.danger;
+  return undefined;
+}
+
 export function StatusBadge({ value }: { value: string }) {
-  const c = tone[value.toUpperCase()] ?? colors.textMuted;
+  const key = value.toUpperCase();
+  const c = tone[key] ?? ladderTone(key) ?? colors.textMuted;
   return (
     <View style={[styles.badge, { backgroundColor: `${c}1A` }]}>
       <Text style={[styles.text, { color: c }]}>{value.replace(/_/g, " ")}</Text>

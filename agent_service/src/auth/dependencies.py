@@ -20,7 +20,7 @@ def _decode(token: str) -> Principal:
         payload = jwt.decode(
             token,
             settings.jwt_secret.get_secret_value(),
-            algorithms=[settings.jwt_algorithm],
+            algorithms=settings.jwt_accepted_algorithms,
             audience=settings.jwt_audience or None,
             issuer=settings.jwt_issuer or None,
             options=options,
@@ -28,7 +28,8 @@ def _decode(token: str) -> Principal:
         subject = payload.get("sub")
         if not isinstance(subject, str) or not subject.strip() or len(subject) > 200:
             raise ValueError("missing subject")
-        return Principal(user_id=str(subject), role=str(payload.get("role", "citizen")))
+        # Core issues upper-case roles (CITIZEN / ADMIN); agent checks are lower-case.
+        return Principal(user_id=str(subject), role=str(payload.get("role", "citizen")).lower())
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bearer token"
